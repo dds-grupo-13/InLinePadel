@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+db.sqlite3
+db.sqlite3-journal
+.env
+*.env
+*.log
+*.sql
+local_settings.py
+media/
+staticfiles/
+.vscode/
+.claude/
+.DS_Store
