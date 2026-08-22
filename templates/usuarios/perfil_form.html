@@ -1,0 +1,141 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 py-12 px-4 sm:px-6 lg:px-8">
+	<div class="max-w-2xl mx-auto">
+		<!-- Header -->
+		<div class="mb-8">
+			<h1 class="text-3xl font-bold text-slate-900 mb-2">Editar perfil</h1>
+			<p class="text-slate-600">Actualiza tu información como jugador</p>
+		</div>
+
+		<!-- Tarjeta del formulario -->
+		<div class="bg-white rounded-lg shadow-md border-l-4 border-emerald-500 p-8">
+			<form method="post" class="space-y-6">
+				{% csrf_token %}
+
+				<!-- Nombre -->
+				<div>
+					<label for="{{ form.nombre.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+						{{ form.nombre.label }}
+					</label>
+					{% if form.nombre.errors %}
+						<div class="mb-2 text-sm text-red-600">
+							{{ form.nombre.errors }}
+						</div>
+					{% endif %}
+					{{ form.nombre }}
+					<input type="text" name="nombre" value="{{ form.nombre.value|default:'' }}" 
+						class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200" 
+						placeholder="Tu nombre" required>
+				</div>
+
+				<!-- Apellido -->
+				<div>
+					<label for="{{ form.apellido.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+						{{ form.apellido.label }}
+					</label>
+					{% if form.apellido.errors %}
+						<div class="mb-2 text-sm text-red-600">
+							{{ form.apellido.errors }}
+						</div>
+					{% endif %}
+					<input type="text" name="apellido" value="{{ form.apellido.value|default:'' }}" 
+						class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200" 
+						placeholder="Tu apellido" required>
+				</div>
+
+				<!-- Posición Preferida -->
+				<div>
+					<label for="{{ form.posicion_preferida.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+						{{ form.posicion_preferida.label }}
+					</label>
+					{% if form.posicion_preferida.errors %}
+						<div class="mb-2 text-sm text-red-600">
+							{{ form.posicion_preferida.errors }}
+						</div>
+					{% endif %}
+					<select name="posicion_preferida" 
+						class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+						<option value="">-- Selecciona una posición --</option>
+						<option value="REVES" {% if form.posicion_preferida.value == 'REVES' %}selected{% endif %}>Revés</option>
+						<option value="DRIVE" {% if form.posicion_preferida.value == 'DRIVE' %}selected{% endif %}>Drive</option>
+						<option value="INDISTINTO" {% if form.posicion_preferida.value == 'INDISTINTO' %}selected{% endif %}>Indistinto</option>
+					</select>
+				</div>
+
+				<!-- Zona -->
+				<div>
+					<label for="{{ form.zona.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+						{{ form.zona.label }}
+					</label>
+					{% if form.zona.errors %}
+						<div class="mb-2 text-sm text-red-600">
+							{{ form.zona.errors }}
+						</div>
+					{% endif %}
+					<input type="text" name="zona" value="{{ form.zona.value|default:'' }}" 
+						class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200" 
+						placeholder="Tu zona (ej: Centro, Norte, Sur)" required>
+				</div>
+
+				<!-- Errores no vinculados a campos -->
+				{% if form.non_field_errors %}
+					<div class="bg-red-50 border border-red-200 rounded-lg p-4">
+						<p class="text-sm font-medium text-red-800">{{ form.non_field_errors }}</p>
+					</div>
+				{% endif %}
+
+				<!-- Información adicional (solo lectura) -->
+				<div class="bg-slate-50 rounded-lg p-6 border border-slate-200 mt-8">
+					<h3 class="text-sm font-semibold text-slate-900 mb-4">Información de tu cuenta</h3>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<div>
+							<p class="text-xs font-medium text-slate-600 uppercase">Email</p>
+							<p class="text-base font-semibold text-slate-900">{{ request.user.email }}</p>
+						</div>
+						<div>
+							<p class="text-xs font-medium text-slate-600 uppercase">Puntaje</p>
+							<p class="text-base font-semibold text-emerald-600">{{ object.puntaje }}</p>
+						</div>
+						<div>
+							<p class="text-xs font-medium text-slate-600 uppercase">Categoría</p>
+							<p class="text-base font-semibold text-slate-900">{{ object.categoria_visible }}</p>
+						</div>
+						<div>
+							<p class="text-xs font-medium text-slate-600 uppercase">Partidos</p>
+							<p class="text-base font-semibold text-slate-900">{{ object.partidos_registrados }}</p>
+						</div>
+						<div>
+							<p class="text-xs font-medium text-slate-600 uppercase">Estado</p>
+							<p class="text-base font-semibold">
+								{% if object.es_provisorio %}
+									<span class="inline-block px-3 py-1 bg-yellow-100 text-yellow-700 text-xs rounded-full">Provisional</span>
+								{% else %}
+									<span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">Consolidado</span>
+								{% endif %}
+							</p>
+						</div>
+					</div>
+				</div>
+
+				<!-- Botones de acción -->
+				<div class="flex justify-between items-center pt-6 border-t border-slate-200">
+					<a href="{% url 'partidas:mis_partidos' %}" class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
+						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+						</svg>
+						Cancelar
+					</a>
+					<button type="submit" class="inline-flex items-center px-6 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
+						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+						</svg>
+						Guardar cambios
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+</div>
+{% endblock %}
