@@ -67,6 +67,55 @@ class AceptarSolicitudViewTests(TestCase):
         )
 
 
+class InscripcionCreateViewTests(TestCase):
+    def setUp(self):
+        self.user = Usuario.objects.create_user(email='jugador@example.com', password='secret123')
+        self.jugador = Jugador.objects.create(
+            usuario=self.user,
+            nombre='Jugador',
+            apellido='Demo',
+            zona='Centro',
+        )
+        self.lobby = Lobby.objects.create(
+            privacidad=Lobby.Privacidad.PUBLICO,
+            rango_min=1,
+            rango_max=5,
+            plazo_limite=timezone.now() + timedelta(days=1),
+        )
+        admin = Usuario.objects.create_user(email='admin@example.com', password='secret123')
+        club = Club.objects.create(
+            denominacion='Club Test',
+            direccion='Calle Falsa 123',
+            zona='Centro',
+            habilitado_por=AdminSistema.objects.create(usuario=admin),
+        )
+        cancha = Cancha.objects.create(
+            club=club,
+            identificacion='Cancha 1',
+            tipo=Cancha.Tipo.TECHADA,
+        )
+        turno = Turno.objects.create(
+            cancha=cancha,
+            fecha=timezone.now().date() + timedelta(days=1),
+            hora_inicio=(timezone.now() + timedelta(hours=1)).time(),
+            precio=100.00,
+            estado=Turno.Estado.LIBRE,
+        )
+        self.reserva = Reserva.objects.create(
+            lobby=self.lobby,
+            turno=turno,
+            estado=Reserva.Estado.PROVISORIA,
+            codigo_reserva=None,
+        )
+
+    def test_unirse_lobby_solo_acepta_post(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('partidas:unirse_lobby', kwargs={'lobby_id': self.lobby.pk}))
+
+        self.assertEqual(response.status_code, 405)
+
+
 class ReservaCancelViewTests(TestCase):
 	def setUp(self):
 		# Crear admin del sistema

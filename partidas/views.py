@@ -1,8 +1,10 @@
 import uuid
+from datetime import datetime, timedelta
 
 from django import forms
 from django.contrib import messages
-from django.db import transaction
+from django.contrib.auth.decorators import login_required
+from django.db import DatabaseError, transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -13,8 +15,89 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 
 from clubes.models import Turno
 from social.models import SolicitudAcceso
+from usuarios.models import Jugador
 
 from .models import Inscripcion, Lobby, Reserva
+from .forms import LobbyCreateForm
+
+
+def _turnos_se_superponen(turno_a, turno_b):
+	if turno_a.fecha != turno_b.fecha:
+		return False
+
+	inicio_a = datetime.combine(turno_a.fecha, turno_a.hora_inicio)
+	fin_a = inicio_a + timedelta(minutes=turno_a.duracion)
+	inicio_b = datetime.combine(turno_b.fecha, turno_b.hora_inicio)
+	fin_b = inicio_b + timedelta(minutes=turno_b.duracion)
+	return inicio_a < fin_b and inicio_b < fin_a
+
+
+@login_required
+def crear_lobby_y_reserva(request, turno_id):
+	turno = get_object_or_404(
+		Turno.objects.select_related('cancha__club'),
+		pk=turno_id,
+		estado=Turno.Estado.LIBRE,
+	)
+	jugador = getattr(request.user, 'jugador', None)
+	if jugador is None:
+		messages.error(request, 'Necesitás tener un perfil de jugador para crear un lobby.')
+		return redirect('clubes:cancha_detail', cancha_id=turno.cancha_id)
+
+	if request.method == 'GET':
+		if not turno.esta_disponible_para_reserva():
+			messages.error(request, 'El turno seleccionado ya no está disponible.')
+			return redirect('clubes:cancha_detail', cancha_id=turno.cancha_id)
+		return render(request, 'partidas/lobby_form.html', {'form': LobbyCreateForm(), 'turno': turno})
+
+	form = LobbyCreateForm(request.POST)
+	if not form.is_valid():
+		return render(request, 'partidas/lobby_form.html', {'form': form, 'turno': turno})
+
+	try:
+		with transaction.atomic():
+			jugador = Jugador.objects.select_for_update().get(pk=jugador.pk)
+			reservas_activas = Inscripcion.objects.filter(
+				jugador=jugador,
+				rol=Inscripcion.Rol.CAPITAN,
+				lobby__estado__in=[Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO],
+				lobby__reserva__estado__in=[Reserva.Estado.PROVISORIA, Reserva.Estado.CONFIRMADA],
+			).count()
+			if reservas_activas >= 2:
+				messages.error(request, 'Solo podés tener hasta 2 canchas reservadas activas.')
+				return redirect('clubes:cancha_detail', cancha_id=turno.cancha_id)
+
+			turno = Turno.objects.select_for_update(nowait=True).get(
+				id=turno_id,
+				estado=Turno.Estado.LIBRE,
+			)
+			if not turno.esta_disponible_para_reserva():
+				raise DatabaseError('El turno seleccionado ya no está disponible.')
+
+			lobby = form.save(commit=False)
+			lobby.plazo_limite = timezone.now() + timedelta(days=2)
+			lobby.estado = Lobby.Estado.EN_FORMACION
+			lobby.save()
+			Reserva.objects.create(
+				lobby=lobby,
+				turno=turno,
+				estado=Reserva.Estado.PROVISORIA,
+				codigo_reserva=None,
+			)
+			turno.estado = Turno.Estado.BLOQUEADO
+			turno.save(update_fields=['estado'])
+			Inscripcion.objects.create(
+				lobby=lobby,
+				jugador=jugador,
+				numero_cupo=1,
+				rol=Inscripcion.Rol.CAPITAN,
+			)
+	except DatabaseError:
+		messages.error(request, 'El turno ya no está disponible. Elegí otro turno.')
+		return redirect('clubes:cancha_detail', cancha_id=turno.cancha_id)
+
+	messages.success(request, 'La reserva y el lobby fueron creados correctamente.')
+	return redirect('partidas:lobby_detail', pk=lobby.pk)
 
 
 class ReservaForm(forms.ModelForm):
@@ -51,7 +134,7 @@ class ReservaCreateView(CreateView):
 				Turno.objects.select_for_update(),
 				pk=self.kwargs['turno_id'],
 			)
-			if turno.estado != Turno.Estado.LIBRE:
+			if turno.estado != Turno.Estado.LIBRE or not turno.esta_disponible_para_reserva():
 				form.add_error(None, 'El turno seleccionado ya no está disponible.')
 				return self.form_invalid(form)
 
@@ -217,22 +300,14 @@ class LobbyListView(ListView):
 
 class InscripcionCreateView(LoginRequiredMixin, CreateView):
 	model = Inscripcion
-	template_name = 'partidas/inscripcion_form.html'
 	fields = []
+	http_method_names = ['post']
 
-	def get_lobby(self):
-		return get_object_or_404(Lobby, pk=self.kwargs['lobby_id'])
-
-	def get_context_data(self, **kwargs):
-		context = super().get_context_data(**kwargs)
-		context['lobby'] = self.get_lobby()
-		return context
-
-	def form_valid(self, form):
-		jugador = getattr(self.request.user, 'jugador', None)
+	def post(self, request, *args, **kwargs):
+		jugador = getattr(request.user, 'jugador', None)
 		if jugador is None:
-			form.add_error(None, 'El usuario actual no tiene un perfil de jugador.')
-			return self.form_invalid(form)
+			messages.error(request, 'El usuario actual no tiene un perfil de jugador.')
+			return redirect('partidas:lobby_list')
 
 		with transaction.atomic():
 			lobby = get_object_or_404(
@@ -240,30 +315,52 @@ class InscripcionCreateView(LoginRequiredMixin, CreateView):
 				pk=self.kwargs['lobby_id'],
 			)
 			if lobby.estado != Lobby.Estado.EN_FORMACION:
-				form.add_error(None, 'El lobby no está disponible para nuevas inscripciones.')
-				return self.form_invalid(form)
+				messages.error(request, 'El lobby no está disponible para nuevas inscripciones.')
+				return redirect('partidas:lobby_detail', pk=lobby.pk)
 
 			inscripciones = list(
 				Inscripcion.objects.select_for_update().filter(lobby=lobby)
 			)
 			if any(inscripcion.jugador_id == jugador.pk for inscripcion in inscripciones):
-				form.add_error(None, 'Ya estás inscripto en este lobby.')
-				return self.form_invalid(form)
+				messages.error(request, 'Ya estás inscripto en este lobby.')
+				return redirect('partidas:lobby_detail', pk=lobby.pk)
 
 			if len(inscripciones) >= Lobby.CANTIDAD_CUPOS:
-				form.add_error(None, 'El lobby ya está completo.')
-				return self.form_invalid(form)
+				messages.error(request, 'El lobby ya está completo.')
+				return redirect('partidas:lobby_detail', pk=lobby.pk)
+
+			turno_nuevo = get_object_or_404(
+				Reserva.objects.select_related('turno'),
+				lobby=lobby,
+			).turno
+			participaciones_activas = (
+				Inscripcion.objects
+				.filter(
+					jugador=jugador,
+					lobby__estado__in=[Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO],
+					lobby__reserva__estado__in=[Reserva.Estado.PROVISORIA, Reserva.Estado.CONFIRMADA],
+				)
+				.exclude(lobby=lobby)
+				.select_related('lobby__reserva__turno')
+			)
+			if any(
+				_turnos_se_superponen(turno_nuevo, inscripcion.lobby.reserva.turno)
+				for inscripcion in participaciones_activas
+			):
+				messages.error(request, 'No podés unirte: el horario se superpone con otro lobby en el que participás.')
+				return redirect('partidas:lobby_detail', pk=lobby.pk)
 
 			cupos_ocupados = {inscripcion.numero_cupo for inscripcion in inscripciones}
 			numero_cupo = next(
 				numero for numero in range(1, Lobby.CANTIDAD_CUPOS + 1)
 				if numero not in cupos_ocupados
 			)
-			inscripcion = form.save(commit=False)
-			inscripcion.lobby = lobby
-			inscripcion.jugador = jugador
-			inscripcion.numero_cupo = numero_cupo
-			inscripcion.save()
+			Inscripcion.objects.create(
+				lobby=lobby,
+				jugador=jugador,
+				numero_cupo=numero_cupo,
+				rol=Inscripcion.Rol.JUGADOR,
+			)
 
 			if len(inscripciones) + 1 == Lobby.CANTIDAD_CUPOS:
 				reserva = get_object_or_404(
@@ -279,9 +376,8 @@ class InscripcionCreateView(LoginRequiredMixin, CreateView):
 				reserva.turno.estado = Turno.Estado.CONFIRMADO
 				reserva.turno.save(update_fields=['estado'])
 
-		messages.success(self.request, 'Te incorporaste al lobby correctamente.')
-		return redirect('partidas:lobby_detail', pk=self.kwargs['lobby_id'])
-
+		messages.success(request, 'Te incorporaste al lobby correctamente.')
+		return redirect('partidas:lobby_detail', pk=lobby.pk)
 
 class MisPartidosListView(LoginRequiredMixin, ListView):
 	model = Inscripcion

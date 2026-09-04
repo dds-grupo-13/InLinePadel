@@ -1,4 +1,8 @@
+from datetime import datetime
+
 from django.db import models
+from django.utils import timezone
+
 
 class Club(models.Model):
 
@@ -89,3 +93,12 @@ class Turno(models.Model):
 
     def __str__(self):
         return f"{self.cancha} {self.fecha} {self.hora_inicio} [{self.estado}]"
+
+    def esta_disponible_para_reserva(self):
+        if self.estado != self.Estado.LIBRE:
+            return False
+
+        ahora = timezone.now()
+        turno_dt = datetime.combine(self.fecha, self.hora_inicio)
+        turno_aware = timezone.make_aware(turno_dt, timezone.get_current_timezone())
+        return turno_aware > ahora

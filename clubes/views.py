@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.db.models import Count
+from django.utils import timezone
 from django.views.generic import ListView
 
 from .models import Cancha, Club
@@ -12,11 +13,7 @@ class ClubListView(ListView):
 	context_object_name = 'clubs'
 
 	def get_queryset(self):
-		self.mode = self.request.GET.get('modo', 'crear')
-		if self.mode not in {'crear', 'unirse'}:
-			self.mode = 'crear'
-
-		clubs = list(Club.objects.prefetch_related('canchas').order_by('denominacion'))
+		clubs = list(Club.objects.filter(estado=Club.Estado.ACTIVO).prefetch_related('canchas').order_by('denominacion'))
 		open_lobbies = (
 			Lobby.objects
 			.filter(estado=Lobby.Estado.EN_FORMACION, reserva__isnull=False)
@@ -34,15 +31,7 @@ class ClubListView(ListView):
 			club.canchas_disponibles = club.canchas.exists()
 			club.lobbies_abiertos = lobbies_por_club.get(club.pk, 0)
 
-		if self.mode == 'unirse':
-			clubs = [club for club in clubs if club.lobbies_abiertos > 0]
-
 		return clubs
-
-	def get_context_data(self, **kwargs):
-		context = super().get_context_data(**kwargs)
-		context['modo'] = getattr(self, 'mode', 'crear')
-		return context
 
 
 class CanchaListView(ListView):
@@ -61,32 +50,37 @@ class CanchaListView(ListView):
 class CanchaDetailView(ListView):
 	model = Lobby
 	template_name = 'clubes/cancha_detail.html'
-	context_object_name = 'lobbies_abiertos'
+	context_object_name = 'lobbies_activos'
 
 	def get_cancha(self):
 		return get_object_or_404(Cancha.objects.select_related('club'), pk=self.kwargs['cancha_id'])
 
 	def get_queryset(self):
 		cancha = self.get_cancha()
+		fecha_actual = timezone.now().date()
 		return (
 			Lobby.objects
 			.filter(
 				estado=Lobby.Estado.EN_FORMACION,
 				reserva__turno__cancha=cancha,
+				reserva__turno__fecha__gte=fecha_actual,
 			)
 			.annotate(cupos_ocupados=Count('inscripciones'))
 			.filter(cupos_ocupados__lt=Lobby.CANTIDAD_CUPOS)
-			.select_related('reserva__turno__cancha__club')
+			.select_related('reserva__turno')
 			.prefetch_related('inscripciones')
-			.order_by('-fecha_creacion')
+			.order_by('reserva__turno__fecha', 'reserva__turno__hora_inicio')
 		)
 
 	def get_context_data(self, **kwargs):
 		context = super().get_context_data(**kwargs)
 		cancha = self.get_cancha()
-		turnos = cancha.turnos.order_by('fecha', 'hora_inicio')
+		fecha_actual = timezone.now().date()
+		turnos = cancha.turnos.filter(
+			estado='LIBRE',
+			fecha__gte=fecha_actual,
+		).order_by('fecha', 'hora_inicio')
 		context['cancha'] = cancha
 		context['club'] = cancha.club
 		context['turnos'] = turnos
-		context['primer_turno_libre'] = turnos.filter(estado='LIBRE').first()
 		return context

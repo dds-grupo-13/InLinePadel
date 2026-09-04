@@ -93,6 +93,16 @@ class Jugador(models.Model):
         DRIVE = "DRIVE", "Drive"
         INDISTINTO = "INDISTINTO", "Indistinto"
 
+    class CategoriaManual(models.TextChoices):
+        PRIMERA = "1ra", "1ra"
+        SEGUNDA = "2da", "2da"
+        TERCERA = "3ra", "3ra"
+        CUARTA = "4ta", "4ta"
+        QUINTA = "5ta", "5ta"
+        SEXTA = "6ta", "6ta"
+        SEPTIMA = "7ma", "7ma"
+        OCTAVA = "8va", "8va"
+
     usuario = models.OneToOneField(
         Usuario,
         on_delete=models.CASCADE,
@@ -109,6 +119,16 @@ class Jugador(models.Model):
     zona = models.CharField(max_length=100)
     puntaje = models.IntegerField(default=PUNTAJE_INICIAL)
     partidos_registrados = models.IntegerField(default=0)
+    categoria_manual = models.CharField(
+        max_length=10,
+        choices=CategoriaManual.choices,
+        default=CategoriaManual.OCTAVA,
+    )
+    contacto = models.ManyToManyField(
+        'self',
+        blank=True,
+        symmetrical=True,
+    )
 
     class Meta:
         verbose_name = "Jugador"

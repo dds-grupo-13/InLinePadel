@@ -135,3 +135,12 @@ class DemoDataTests(TestCase):
         self.assertTrue('_auth_user_id' in self.client.session)
         self.assertEqual(int(self.client.session['_auth_user_id']), Usuario.objects.get(email='demo@inlinepadel.com').pk)
 
+    def test_demo_login_acepta_password_legacy_de_demo(self):
+        call_command('seed_demo_data')
+
+        response = self.client.post(reverse('login'), {'email': 'demo@inlinepadel.com', 'password': 'demo'}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue('_auth_user_id' in self.client.session)
+        self.assertEqual(int(self.client.session['_auth_user_id']), Usuario.objects.get(email='demo@inlinepadel.com').pk)
+

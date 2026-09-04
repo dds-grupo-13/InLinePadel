@@ -4,7 +4,7 @@ from . import views
 app_name = 'partidas'
 
 urlpatterns = [
-    path('turnos/<int:turno_id>/reservar/', views.ReservaCreateView.as_view(), name='crear_reserva'),
+    path('turnos/<int:turno_id>/reservar/', views.crear_lobby_y_reserva, name='crear_reserva'),
     path('lobbies/', views.LobbyListView.as_view(), name='lobby_list'),
     path('lobbies/<int:pk>/', views.LobbyDetailView.as_view(), name='lobby_detail'),
     path('lobbies/<int:lobby_id>/unirse/', views.InscripcionCreateView.as_view(), name='unirse_lobby'),
