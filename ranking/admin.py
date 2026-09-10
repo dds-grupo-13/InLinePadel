@@ -1,6 +1,2 @@
-from django.contrib import admin
-from . import models
-
-admin.site.register(models.Resultado)
-admin.site.register(models.Pareja)
-admin.site.register(models.HistorialPuntaje)
+# App de ranking — fuera de alcance en esta versión (MVP casual).
+# No hay modelos registrados en admin.

@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-slate-900 mb-2">Editar perfil</h1>
+            <p class="text-slate-600">Actualiza tu información como jugador</p>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md border-l-4 border-emerald-500 p-8">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+
+                <div>
+                    <label for="{{ form.nombre.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+                        {{ form.nombre.label }}
+                    </label>
+                    {% if form.nombre.errors %}
+                        <div class="mb-2 text-sm text-red-600">{{ form.nombre.errors }}</div>
+                    {% endif %}
+                    {{ form.nombre }}
+                </div>
+
+                <div>
+                    <label for="{{ form.apellido.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+                        {{ form.apellido.label }}
+                    </label>
+                    {% if form.apellido.errors %}
+                        <div class="mb-2 text-sm text-red-600">{{ form.apellido.errors }}</div>
+                    {% endif %}
+                    {{ form.apellido }}
+                </div>
+
+                <div>
+                    <label for="{{ form.posicion_preferida.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+                        {{ form.posicion_preferida.label }}
+                    </label>
+                    {% if form.posicion_preferida.errors %}
+                        <div class="mb-2 text-sm text-red-600">{{ form.posicion_preferida.errors }}</div>
+                    {% endif %}
+                    {{ form.posicion_preferida }}
+                </div>
+
+                <div>
+                    <label for="{{ form.zona.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
+                        {{ form.zona.label }}
+                    </label>
+                    {% if form.zona.errors %}
+                        <div class="mb-2 text-sm text-red-600">{{ form.zona.errors }}</div>
+                    {% endif %}
+                    {{ form.zona }}
+                </div>
+
+                {% if form.non_field_errors %}
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <p class="text-sm font-medium text-red-800">{{ form.non_field_errors }}</p>
+                    </div>
+                {% endif %}
+
+                <div class="bg-slate-50 rounded-lg p-6 border border-slate-200 mt-8">
+                    <h3 class="text-sm font-semibold text-slate-900 mb-4">Información de tu cuenta</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-medium text-slate-600 uppercase">Email</p>
+                            <p class="text-base font-semibold text-slate-900">{{ request.user.email }}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium text-slate-600 uppercase">ID</p>
+                            <p class="text-base font-semibold text-slate-900">#{{ object.pk }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center pt-6 border-t border-slate-200">
+                    <a href="{% url 'partidas:mis_partidos' %}" class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
+                        Cancelar
+                    </a>
+                    <button type="submit" class="inline-flex items-center px-6 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
+                        Guardar cambios
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}InLine Padel{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900">
+    {% if request.user.is_authenticated %}
+        <nav class="border-b border-slate-200 bg-white" aria-label="Navegación principal">
+            <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+                <a href="{% url 'clubes:club_list' %}" class="text-lg font-bold tracking-tight text-slate-900">InLine Padel</a>
+                <a href="{% url 'usuarios:perfil' %}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                    <svg class="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19a6 6 0 0 0-12 0m6-8a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm5 2h5m-2-2v4" />
+                    </svg>
+                    <span>Mi perfil</span>
+                </a>
+            </div>
+        </nav>
+    {% endif %}
+    {% block content %}{% endblock %}
+</body>
+</html>

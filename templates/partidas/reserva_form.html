@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}Reservar turno | InLine Padel{% endblock %}
+
+{% block content %}
+<main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+    <div class="mb-8">
+        <div class="mb-4">
+            <a href="{% url 'clubes:cancha_detail' cancha_id=turno.cancha.pk %}" class="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 transition hover:text-emerald-900">
+                <span aria-hidden="true">←</span>
+                <span>Volver a la cancha</span>
+            </a>
+        </div>
+        <p class="text-sm font-semibold uppercase tracking-widest text-emerald-600">Nueva reserva</p>
+        <h1 class="mt-2 text-3xl font-bold tracking-tight text-slate-900">Confirmar turno</h1>
+        <p class="mt-2 text-slate-600">Revisá los datos y elegí el lobby asociado a la reserva.</p>
+    </div>
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <div class="border-b border-slate-200 pb-6">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <p class="text-sm text-slate-500">{{ turno.cancha.club.denominacion }}</p>
+                    <h2 class="mt-1 text-xl font-bold text-slate-900">Cancha {{ turno.cancha.identificacion }}</h2>
+                </div>
+                <span class="rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">Disponible</span>
+            </div>
+            <dl class="mt-6 grid gap-4 sm:grid-cols-3">
+                <div>
+                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt>
+                    <dd class="mt-1 font-medium text-slate-900">{{ turno.fecha|date:'d/m/Y' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Hora</dt>
+                    <dd class="mt-1 font-medium text-slate-900">{{ turno.hora_inicio|time:'H:i' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio</dt>
+                    <dd class="mt-1 font-medium text-slate-900">${{ turno.precio }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        <form method="post" class="pt-6">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+            <div>
+                <label for="{{ form.lobby.id_for_label }}" class="block text-sm font-semibold text-slate-700">{{ form.lobby.label }}</label>
+                <p class="mb-2 mt-1 text-sm text-slate-500">Seleccioná el lobby que ocupará este turno.</p>
+                {{ form.lobby }}
+                {% for error in form.lobby.errors %}
+                    <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+                {% endfor %}
+            </div>
+            <button type="submit" class="mt-6 w-full rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                Confirmar reserva
+            </button>
+        </form>
+    </section>
+</main>
+{% endblock %}
