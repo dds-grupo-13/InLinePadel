@@ -113,6 +113,16 @@ class JugadorUpdateViewTests(TestCase):
 		self.assertIn('nombre', response.context['form'].errors)
 
 class DemoDataTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = Usuario.objects.create_user(email='jugador@example.com', password='secret123')
+        self.jugador = Jugador.objects.create(
+            usuario=self.user,
+            nombre='Juan',
+            apellido='Perez',
+            zona='Centro',
+        )
+
     def test_seed_demo_data_creates_demo_content(self):
         call_command('seed_demo_data')
 
@@ -129,18 +139,167 @@ class DemoDataTests(TestCase):
     def test_demo_login_autentica_al_usuario_demo(self):
         call_command('seed_demo_data')
 
-        response = self.client.post(reverse('login'), {'email': 'demo@inlinepadel.com', 'password': 'demo123'}, follow=True)
+        response = self.client.post(
+            reverse('login'),
+            {'email': 'demo@inlinepadel.com', 'password': 'demo123'},
+            follow=True,
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue('_auth_user_id' in self.client.session)
-        self.assertEqual(int(self.client.session['_auth_user_id']), Usuario.objects.get(email='demo@inlinepadel.com').pk)
+        self.assertEqual(
+            int(self.client.session['_auth_user_id']),
+            Usuario.objects.get(email='demo@inlinepadel.com').pk,
+        )
 
     def test_demo_login_acepta_password_legacy_de_demo(self):
         call_command('seed_demo_data')
 
-        response = self.client.post(reverse('login'), {'email': 'demo@inlinepadel.com', 'password': 'demo'}, follow=True)
+        response = self.client.post(
+            reverse('login'),
+            {'email': 'demo@inlinepadel.com', 'password': 'demo'},
+            follow=True,
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue('_auth_user_id' in self.client.session)
-        self.assertEqual(int(self.client.session['_auth_user_id']), Usuario.objects.get(email='demo@inlinepadel.com').pk)
+        self.assertEqual(
+            int(self.client.session['_auth_user_id']),
+            Usuario.objects.get(email='demo@inlinepadel.com').pk,
+        )
+
+    def test_se_crea_contacto_al_agregar_desde_perfil(self):
+        import social.models
+        otro_user = Usuario.objects.create_user(
+            email='amigo@example.com',
+            password='secret123',
+        )
+        otro_jugador = Jugador.objects.create(
+            usuario=otro_user,
+            nombre='Ana',
+            apellido='Gomez',
+            zona='Belgrano',
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('usuarios:perfil_agregar_contacto'),
+            {'amigo_id': str(otro_jugador.pk)},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            social.models.Contacto.objects.filter(
+                jugador=self.jugador,
+                contacto=otro_jugador,
+                estado=social.models.Contacto.Estado.ACEPTADO,
+            ).exists()
+        )
+
+    def test_perfil_muestra_contactos_iniciados_y_recibidos(self):
+        import social.models
+        otro_user = Usuario.objects.create_user(
+            email='amigo@example.com',
+            password='secret123',
+        )
+        otro_jugador = Jugador.objects.create(
+            usuario=otro_user,
+            nombre='Ana',
+            apellido='Gomez',
+            zona='Belgrano',
+        )
+        social.models.Contacto.objects.create(
+            jugador=self.jugador,
+            contacto=otro_jugador,
+            estado=social.models.Contacto.Estado.ACEPTADO,
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('usuarios:perfil'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['contactos_iniciados'].count(), 1)
+        self.assertEqual(response.context['contactos_iniciados'].first().pk, otro_jugador.pk)
+        self.assertEqual(response.context['contactos_recibidos'].count(), 0)
+
+    def test_remover_contacto_elimina_relacion(self):
+        import social.models
+        otro_user = Usuario.objects.create_user(
+            email='amigo@example.com',
+            password='secret123',
+        )
+        otro_jugador = Jugador.objects.create(
+            usuario=otro_user,
+            nombre='Ana',
+            apellido='Gomez',
+            zona='Belgrano',
+        )
+        contacto = social.models.Contacto.objects.create(
+            jugador=self.jugador,
+            contacto=otro_jugador,
+            estado=social.models.Contacto.Estado.ACEPTADO,
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('usuarios:perfil_remover_contacto'),
+            {'contacto_id': str(otro_jugador.pk)},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(social.models.Contacto.objects.filter(pk=contacto.pk).exists())
+        self.assertEqual(response.context['contactos_iniciados'].count(), 0)
+
+    def test_buscar_jugadores_excluye_propio_y_contactos(self):
+        import social.models
+        otro_user = Usuario.objects.create_user(
+            email='amigo@example.com',
+            password='secret123',
+        )
+        otro_jugador = Jugador.objects.create(
+            usuario=otro_user,
+            nombre='Ana',
+            apellido='Gomez',
+            zona='Belgrano',
+        )
+        social.models.Contacto.objects.create(
+            jugador=self.jugador,
+            contacto=otro_jugador,
+            estado=social.models.Contacto.Estado.ACEPTADO,
+        )
+        tercer_user = Usuario.objects.create_user(
+            email='tercero@example.com',
+            password='secret123',
+        )
+        tercer_jugador = Jugador.objects.create(
+            usuario=tercer_user,
+            nombre='Luis',
+            apellido='Ferraro',
+            zona='Caballito',
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('usuarios:perfil_buscar') + '?q=Fer',
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ferraro')
+        self.assertNotContains(response, 'Gomez')
+        self.assertNotContains(response, self.jugador.apellido)
+
+    def test_buscar_jugadores_sin_query_devuelve_disponibles(self):
+        import social.models
+        otro_user = Usuario.objects.create_user(
+            email='amigo@example.com',
+            password='secret123',
+        )
+        Jugador.objects.create(
+            usuario=otro_user,
+            nombre='Ana',
+            apellido='Gomez',
+            zona='Belgrano',
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse('usuarios:perfil_buscar'),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ana')
 

@@ -426,36 +426,27 @@ class MisPartidosListView(LoginRequiredMixin, ListView):
 
 
 class LobbyUpdateForm(forms.ModelForm):
-	class Meta:
-		model = Lobby
-		fields = [
-			'privacidad',
-			'rango_min',
-			'rango_max',
-			'admite_provisorios',
-			'plazo_limite',
-		]
-		labels = {
-			'privacidad': 'Privacidad',
-			'rango_min': 'Rango mínimo',
-			'rango_max': 'Rango máximo',
-			'admite_provisorios': 'Admitir jugadores provisorios',
-			'plazo_limite': 'Plazo límite',
-		}
-		widgets = {
-			'privacidad': forms.Select(attrs={'class': 'form-input'}),
-			'rango_min': forms.NumberInput(attrs={'class': 'form-input', 'min': 0}),
-			'rango_max': forms.NumberInput(attrs={'class': 'form-input', 'min': 0}),
-			'admite_provisorios': forms.CheckboxInput(attrs={'class': 'h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500'}),
-			'plazo_limite': forms.DateTimeInput(
-				attrs={'class': 'form-input', 'type': 'datetime-local'},
-				format='%Y-%m-%dT%H:%M',
-			),
-		}
+    class Meta:
+        model = Lobby
+        fields = [
+            'privacidad',
+            'plazo_limite',
+        ]
+        labels = {
+            'privacidad': 'Privacidad',
+            'plazo_limite': 'Plazo límite para completar los cupos',
+        }
+        widgets = {
+            'privacidad': forms.Select(attrs={'class': 'form-input'}),
+            'plazo_limite': forms.DateTimeInput(
+                attrs={'class': 'form-input', 'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M',
+            ),
+        }
 
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self.fields['plazo_limite'].input_formats = ['%Y-%m-%dT%H:%M']
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['plazo_limite'].input_formats = ['%Y-%m-%dT%H:%M']
 
 
 class LobbyUpdateView(LoginRequiredMixin, UpdateView):
@@ -602,6 +593,10 @@ class ReservaCheckInView(LoginRequiredMixin, View):
 
 			turno.estado = Turno.Estado.CUMPLIDO
 			turno.save(update_fields=['estado'])
+
+			lobby = Lobby.objects.select_for_update().get(pk=reserva_locked.lobby_id)
+			lobby.estado = Lobby.Estado.JUGADO
+			lobby.save(update_fields=['estado'])
 
 		messages.success(request, 'El check-in fue registrado correctamente.')
 		return redirect('partidas:mis_partidos')

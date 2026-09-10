@@ -8,30 +8,20 @@ class LobbyCreateForm(forms.ModelForm):
         model = Lobby
         fields = [
             'privacidad',
-            'rango_min',
-            'rango_max',
-            'admite_provisorios',
+            'plazo_limite',
         ]
         labels = {
             'privacidad': 'Privacidad del lobby',
-            'rango_min': 'Rango mínimo',
-            'rango_max': 'Rango máximo',
-            'admite_provisorios': 'Admitir jugadores sin puntaje consolidado',
+            'plazo_limite': 'Plazo límite para completar los cupos',
         }
         widgets = {
-            'privacidad': forms.Select(attrs={'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900'}),
-            'rango_min': forms.NumberInput(attrs={'min': 1, 'max': 5, 'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900'}),
-            'rango_max': forms.NumberInput(attrs={'min': 1, 'max': 5, 'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900'}),
-            'admite_provisorios': forms.CheckboxInput(attrs={'class': 'h-4 w-4 rounded border-slate-300 text-emerald-600'}),
+            'privacidad': forms.Select(attrs={'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200'}),
+            'plazo_limite': forms.DateTimeInput(attrs={'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200', 'type': 'datetime-local'}),
         }
         help_texts = {
-            'admite_provisorios': 'Permite el ingreso de jugadores nuevos con menos de 10 partidos registrados.',
+            'plazo_limite': 'Fecha y hora límite para que se completen los cupos del lobby.',
         }
 
     def clean(self):
         cleaned_data = super().clean()
-        rango_min = cleaned_data.get('rango_min')
-        rango_max = cleaned_data.get('rango_max')
-        if rango_min is not None and rango_max is not None and rango_min > rango_max:
-            raise forms.ValidationError('El rango mínimo no puede superar al rango máximo.')
         return cleaned_data

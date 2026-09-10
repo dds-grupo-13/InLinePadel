@@ -1,3 +1,2 @@
-from django.test import TestCase
-
-# Create your tests here.
+# App de ranking — fuera de alcance en esta versión (MVP casual).
+# No hay tests implementados.

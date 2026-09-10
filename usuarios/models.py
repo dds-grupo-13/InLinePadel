@@ -4,9 +4,10 @@ from django.contrib.auth.models import (
     PermissionsMixin,
 )
 from django.db import models
+from django.utils import timezone
+
 
 class UsuarioManager(BaseUserManager):
-
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError("El usuario debe tener un email.")
@@ -24,7 +25,6 @@ class UsuarioManager(BaseUserManager):
 
 
 class Usuario(AbstractBaseUser, PermissionsMixin):
-
     email = models.EmailField(unique=True)
 
     is_active = models.BooleanField(default=True)
@@ -45,7 +45,6 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
 
 class AdminSistema(models.Model):
-
     usuario = models.OneToOneField(
         Usuario,
         on_delete=models.CASCADE,
@@ -62,7 +61,6 @@ class AdminSistema(models.Model):
 
 
 class AdminClub(models.Model):
-
     usuario = models.OneToOneField(
         Usuario,
         on_delete=models.CASCADE,
@@ -84,24 +82,10 @@ class AdminClub(models.Model):
 
 
 class Jugador(models.Model):
-
-    PUNTAJE_INICIAL = 1000
-    PARTIDOS_PARA_CONSOLIDAR = 10
-
     class Posicion(models.TextChoices):
         REVES = "REVES", "Revés"
         DRIVE = "DRIVE", "Drive"
         INDISTINTO = "INDISTINTO", "Indistinto"
-
-    class CategoriaManual(models.TextChoices):
-        PRIMERA = "1ra", "1ra"
-        SEGUNDA = "2da", "2da"
-        TERCERA = "3ra", "3ra"
-        CUARTA = "4ta", "4ta"
-        QUINTA = "5ta", "5ta"
-        SEXTA = "6ta", "6ta"
-        SEPTIMA = "7ma", "7ma"
-        OCTAVA = "8va", "8va"
 
     usuario = models.OneToOneField(
         Usuario,
@@ -117,46 +101,16 @@ class Jugador(models.Model):
         default=Posicion.INDISTINTO,
     )
     zona = models.CharField(max_length=100)
-    puntaje = models.IntegerField(default=PUNTAJE_INICIAL)
-    partidos_registrados = models.IntegerField(default=0)
-    categoria_manual = models.CharField(
-        max_length=10,
-        choices=CategoriaManual.choices,
-        default=CategoriaManual.OCTAVA,
-    )
-    contacto = models.ManyToManyField(
-        'self',
-        blank=True,
-        symmetrical=True,
-    )
 
     class Meta:
         verbose_name = "Jugador"
         verbose_name_plural = "Jugadores"
 
     def __str__(self):
-        return f"{self.nombre} {self.apellido} ({self.puntaje})"
-
-    def es_provisorio(self) -> bool:
-        return self.partidos_registrados < self.PARTIDOS_PARA_CONSOLIDAR
-
-    def factor_k(self) -> int:
-        return 40 if self.es_provisorio() else 20
+        return f"{self.nombre} {self.apellido}"
 
     def categoria_visible(self) -> str:
-        p = self.puntaje
-        if p < 850:
-            return "8va"
-        if p < 1000:
-            return "7ma"
-        if p < 1150:
-            return "6ta"
-        if p < 1300:
-            return "5ta"
-        if p < 1450:
-            return "4ta"
-        if p < 1600:
-            return "3ra"
-        if p < 1750:
-            return "2da"
-        return "1ra"
+        raise NotImplementedError(
+            "El sistema de niveles (Elo) no está implementado en esta versión. "
+            "La categoría visible quedó fuera de alcance."
+        )

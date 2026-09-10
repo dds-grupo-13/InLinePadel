@@ -1,7 +1,7 @@
 from django.db import models
 
-class Lobby(models.Model):
 
+class Lobby(models.Model):
     CANTIDAD_CUPOS = 4
 
     class Estado(models.TextChoices):
@@ -20,10 +20,6 @@ class Lobby(models.Model):
         choices=Privacidad.choices,
         default=Privacidad.PUBLICO,
     )
-
-    rango_min = models.IntegerField()
-    rango_max = models.IntegerField()
-    admite_provisorios = models.BooleanField(default=True)
     plazo_limite = models.DateTimeField()
     estado = models.CharField(
         max_length=12,
@@ -48,7 +44,6 @@ class Lobby(models.Model):
 
 
 class Reserva(models.Model):
-
     class Estado(models.TextChoices):
         PROVISORIA = "PROVISORIA", "Provisoria"
         CONFIRMADA = "CONFIRMADA", "Confirmada"
@@ -87,7 +82,6 @@ class Reserva(models.Model):
 
 
 class Inscripcion(models.Model):
-
     class Rol(models.TextChoices):
         CAPITAN = "CAPITAN", "Capitán"
         JUGADOR = "JUGADOR", "Jugador"
@@ -122,20 +116,3 @@ class Inscripcion(models.Model):
 
     def __str__(self):
         return f"{self.jugador} en Lobby #{self.lobby_id} (cupo {self.numero_cupo})"
-
-
-class Partido(models.Model):
-
-    lobby = models.OneToOneField(
-        Lobby,
-        on_delete=models.PROTECT,
-        related_name="partido",
-    )
-    fecha = models.DateField()
-
-    class Meta:
-        verbose_name = "Partido"
-        verbose_name_plural = "Partidos"
-
-    def __str__(self):
-        return f"Partido #{self.pk} - {self.fecha}"

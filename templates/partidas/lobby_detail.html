@@ -27,8 +27,8 @@
                     <dd class="mt-1 font-medium text-white">{{ lobby.get_privacidad_display }}</dd>
                 </div>
                 <div>
-                    <dt class="text-slate-400">Rango</dt>
-                    <dd class="mt-1 font-medium text-white">{{ lobby.rango_min }} - {{ lobby.rango_max }}</dd>
+                    <dt class="text-slate-400">Plazo límite</dt>
+                    <dd class="mt-1 font-medium text-white">{{ lobby.plazo_limite|date:'d/m/Y H:i' }}</dd>
                 </div>
                 <div>
                     <dt class="text-slate-400">Inscripciones</dt>

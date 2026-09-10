@@ -1,3 +1,2 @@
-from django.shortcuts import render
-
-# Create your views here.
+# App de ranking — fuera de alcance en esta versión (MVP casual).
+# No hay vistas implementadas.
