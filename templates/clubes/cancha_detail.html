@@ -73,28 +73,5 @@
             {% endif %}
         </section>
     </div>
-
-    <a href="{% url 'clubes:cancha_list' club_id=club.pk %}"
-       class="fixed bottom-6 right-6 z-50 inline-flex rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100 transition"
-       id="btn-volver-canchas"
-       style="display:none">
-        Volver a canchas
-    </a>
-    <script>
-        (function() {
-            var btn = document.getElementById('btn-volver-canchas');
-            if (!btn) return;
-            function check() {
-                if (document.documentElement.scrollHeight > window.innerHeight) {
-                    btn.style.display = 'inline-flex';
-                } else {
-                    btn.style.display = 'none';
-                }
-            }
-            window.addEventListener('scroll', check, {passive: true});
-            window.addEventListener('resize', check);
-            check();
-        })();
-    </script>
 </main>
 {% endblock %}
