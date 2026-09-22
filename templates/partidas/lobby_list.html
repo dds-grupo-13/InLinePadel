@@ -44,15 +44,15 @@
                                 <dd class="font-medium text-slate-900">{{ lobby.reserva.turno.cancha.identificacion }}</dd>
                             </div>
                             <div class="flex justify-between gap-4">
-                                <dt class="text-slate-500">Fecha</dt>
+                                <dt class="flex items-center gap-1.5 text-slate-500">{% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}Fecha</dt>
                                 <dd class="font-medium text-slate-900">{{ lobby.reserva.turno.fecha|date:'d/m/Y' }}</dd>
                             </div>
                             <div class="flex justify-between gap-4">
-                                <dt class="text-slate-500">Hora</dt>
+                                <dt class="flex items-center gap-1.5 text-slate-500">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Hora</dt>
                                 <dd class="font-medium text-slate-900">{{ lobby.reserva.turno.hora_inicio|time:'H:i' }}</dd>
                             </div>
                             <div class="flex justify-between gap-4">
-                                <dt class="text-slate-500">Precio</dt>
+                                <dt class="flex items-center gap-1.5 text-slate-500">{% include 'partials/_icon.html' with icon='price' cls='h-3.5 w-3.5' %}Precio</dt>
                                 <dd class="font-medium text-slate-900">${{ lobby.reserva.turno.precio }}</dd>
                             </div>
                         </dl>
@@ -62,7 +62,7 @@
 
                     <div class="mt-auto pt-6">
                         <div class="mb-4 flex items-center justify-between text-sm">
-                            <span class="text-slate-500">Cupos ocupados</span>
+                            <span class="flex items-center gap-1.5 text-slate-500">{% include 'partials/_icon.html' with icon='users' cls='h-3.5 w-3.5' %}Cupos ocupados</span>
                             <span class="font-semibold text-slate-900">{{ lobby.inscripciones.count }} / 4</span>
                         </div>
                         <a href="{% url 'partidas:lobby_detail' pk=lobby.pk %}" class="block w-full rounded-lg bg-emerald-600 px-5 py-3 text-center font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
@@ -78,12 +78,21 @@
             <p class="mt-2 text-sm text-slate-600">Cuando haya partidos en formación, aparecerán aquí.</p>
         </section>
     {% endif %}
-    <a href="{% url 'clubes:cancha_list' club_id=request.GET.club_id|default:'' %}"
-       class="fixed bottom-6 right-6 z-50 inline-flex rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100 transition"
-       id="btn-volver-canchas"
-       style="display:none">
-        Volver a canchas
-    </a>
+    {% if request.GET.club_id %}
+        <a href="{% url 'clubes:cancha_list' club_id=request.GET.club_id %}"
+           class="fixed bottom-6 right-6 z-50 inline-flex rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100 transition"
+           id="btn-volver-canchas"
+           style="display:none">
+            Volver a canchas
+        </a>
+    {% else %}
+        <a href="{% url 'clubes:club_list' %}"
+           class="fixed bottom-6 right-6 z-50 inline-flex rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-100 transition"
+           id="btn-volver-canchas"
+           style="display:none">
+            Volver al menú
+        </a>
+    {% endif %}
     <script>
         (function() {
             var btn = document.getElementById('btn-volver-canchas');

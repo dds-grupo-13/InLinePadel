@@ -1,137 +1,92 @@
 {% extends 'base.html' %}
 
+{% block title %}Cancelar reserva | InLine Padel{% endblock %}
+
 {% block content %}
-<div class="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 py-12 px-4 sm:px-6 lg:px-8">
-	<div class="max-w-2xl mx-auto">
-		<!-- Header -->
-		<div class="mb-8">
-			<h1 class="text-3xl font-bold text-slate-900 mb-2">Cancelar reserva</h1>
-			<p class="text-slate-600">Esta acción liberará el turno y cancelará el partido</p>
-		</div>
+<main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <header class="bg-slate-900 px-6 py-8 text-white sm:px-8">
+            <p class="text-sm font-semibold uppercase tracking-widest text-red-300">Cancelar reserva</p>
+            <h1 class="mt-2 text-3xl font-bold tracking-tight">¿Estás seguro de que deseas cancelar esta reserva?</h1>
+            <p class="mt-3 text-slate-300">Esta acción liberará el turno y cancelará el partido asociado.</p>
+        </header>
 
-		<!-- Tarjeta de advertencia -->
-		<div class="bg-white rounded-lg shadow-lg border-l-4 border-red-500 p-8">
-			<!-- Icono de advertencia -->
-			<div class="flex items-center justify-center mb-6">
-				<div class="flex items-center justify-center h-16 w-16 rounded-full bg-red-100">
-					<svg class="h-8 w-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4v.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-					</svg>
-				</div>
-			</div>
+        <div class="space-y-8 px-6 py-8 sm:px-8">
+            <section aria-labelledby="detalles-heading">
+                <h2 id="detalles-heading" class="text-xl font-bold text-slate-900">Detalles del turno a cancelar</h2>
+                <dl class="mt-4 grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Club</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.cancha.club.denominacion }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Cancha</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.cancha.identificacion }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}Fecha</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.fecha|date:'d/m/Y' }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Hora</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.hora_inicio|time:'H:i' }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Duración</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.duracion }} minutos</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% include 'partials/_icon.html' with icon='price' cls='h-3.5 w-3.5' %}Precio</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">${{ object.turno.precio }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Código de reserva</dt>
+                        <dd class="mt-2 text-base font-semibold font-mono text-slate-900">{{ object.codigo_reserva|default:'Provisional' }}</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado actual</dt>
+                        <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.get_estado_display }}</dd>
+                    </div>
+                </dl>
+            </section>
 
-			<!-- Título de advertencia -->
-			<h2 class="text-xl font-semibold text-center text-red-800 mb-4">
-				¿Estás seguro de que deseas cancelar esta reserva?
-			</h2>
-			<p class="text-center text-slate-600 mb-8">
-				Esta acción no se puede deshacer. Se liberará el turno y se cancelará el partido.
-			</p>
+            <section class="rounded-xl border border-red-200 bg-red-50 p-5" aria-labelledby="consecuencias-heading">
+                <h2 id="consecuencias-heading" class="text-lg font-bold text-red-900">Consecuencias de la cancelación</h2>
+                <ul class="mt-4 space-y-2 text-sm text-red-800">
+                    <li class="flex items-start gap-2">
+                        <span aria-hidden="true">•</span>
+                        <span>El turno pasará a estado "Libre" y estará disponible para otros jugadores.</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span aria-hidden="true">•</span>
+                        <span>El lobby asociado se cancelará automáticamente.</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span aria-hidden="true">•</span>
+                        <span>Todos los jugadores inscritos en el lobby serán desvinculados.</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span aria-hidden="true">•</span>
+                        <span>Esta acción no se puede deshacer.</span>
+                    </li>
+                </ul>
+            </section>
 
-			<!-- Detalles de la reserva -->
-			<div class="bg-slate-50 rounded-lg p-6 mb-8 border border-slate-200">
-				<h3 class="text-sm font-semibold text-slate-900 mb-4 uppercase">Detalles del turno a cancelar</h3>
-				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-					<!-- Club y Cancha -->
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Club</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.turno.cancha.club.denominacion }}</p>
-					</div>
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Cancha</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.turno.cancha.identificacion }}</p>
-					</div>
-
-					<!-- Fecha y Hora -->
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Fecha</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.turno.fecha|date:"d/m/Y" }}</p>
-					</div>
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Hora</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.turno.hora_inicio|time:"H:i" }}</p>
-					</div>
-
-					<!-- Duración y Precio -->
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Duración</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.turno.duracion }} minutos</p>
-					</div>
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Precio</p>
-						<p class="text-base font-semibold text-slate-900">${{ object.turno.precio }}</p>
-					</div>
-
-					<!-- Código de Reserva y Estado -->
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Código de reserva</p>
-						<p class="text-base font-semibold font-mono text-slate-900">
-							{{ object.codigo_reserva|default:"Provisional" }}
-						</p>
-					</div>
-					<div>
-						<p class="text-xs font-medium text-slate-600 uppercase">Estado actual</p>
-						<p class="text-base font-semibold text-slate-900">{{ object.get_estado_display }}</p>
-					</div>
-				</div>
-			</div>
-
-			<!-- Información de impacto -->
-			<div class="bg-red-50 border border-red-200 rounded-lg p-6 mb-8">
-				<h3 class="text-sm font-semibold text-red-900 mb-3 flex items-center">
-					<svg class="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-						<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-					</svg>
-					Consecuencias de la cancelación
-				</h3>
-				<ul class="text-sm text-red-800 space-y-2">
-					<li class="flex items-start">
-						<span class="inline-block mr-3 mt-0.5">•</span>
-						<span>El turno pasará a estado "Libre" y estará disponible para otros jugadores</span>
-					</li>
-					<li class="flex items-start">
-						<span class="inline-block mr-3 mt-0.5">•</span>
-						<span>El lobby asociado se cancelará automáticamente</span>
-					</li>
-					<li class="flex items-start">
-						<span class="inline-block mr-3 mt-0.5">•</span>
-						<span>Todos los jugadores inscritos en el lobby serán desvinculados</span>
-					</li>
-					<li class="flex items-start">
-						<span class="inline-block mr-3 mt-0.5">•</span>
-						<span>Esta acción no se puede deshacer</span>
-					</li>
-				</ul>
-			</div>
-
-			<!-- Formulario de confirmación -->
-			<form method="post" class="space-y-6">
-				{% csrf_token %}
-
-				<!-- Errores -->
-				{% if form.non_field_errors %}
-					<div class="bg-red-50 border border-red-200 rounded-lg p-4">
-						<p class="text-sm font-medium text-red-800">{{ form.non_field_errors }}</p>
-					</div>
-				{% endif %}
-
-				<!-- Botones de acción -->
-				<div class="flex justify-between items-center pt-6 border-t border-slate-200">
-					<a href="{% url 'partidas:mis_partidos' %}" class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500">
-						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
-						</svg>
-						No, mantener reserva
-					</a>
-					<button type="submit" class="inline-flex items-center px-6 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
-						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-						</svg>
-						Sí, cancelar reserva
-					</button>
-				</div>
-			</form>
-		</div>
-	</div>
-</div>
+            <form method="post" class="border-t border-slate-200 pt-6">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{{ form.non_field_errors }}</div>
+                {% endif %}
+                <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                    <a href="{% url 'partidas:mis_partidos' %}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                        No, mantener reserva
+                    </a>
+                    <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                        Sí, cancelar reserva
+                    </button>
+                </div>
+            </form>
+        </div>
+    </section>
+</main>
 {% endblock %}

@@ -20,8 +20,8 @@
                 <dl class="mt-4 space-y-4 text-sm">
                     <div><dt class="text-slate-400">Club</dt><dd class="mt-1 font-semibold text-white">{{ turno.cancha.club.denominacion }}</dd></div>
                     <div><dt class="text-slate-400">Cancha</dt><dd class="mt-1 font-semibold text-white">{{ turno.cancha.identificacion }}</dd></div>
-                    <div class="flex justify-between gap-4"><div><dt class="text-slate-400">Fecha</dt><dd class="mt-1 font-semibold text-white">{{ turno.fecha|date:'d/m/Y' }}</dd></div><div class="text-right"><dt class="text-slate-400">Hora</dt><dd class="mt-1 font-semibold text-white">{{ turno.hora_inicio|time:'H:i' }}</dd></div></div>
-                    <div><dt class="text-slate-400">Precio de cancha</dt><dd class="mt-1 font-semibold text-white">${{ turno.precio }}</dd></div>
+                    <div class="flex justify-between gap-4"><div><dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}Fecha</dt><dd class="mt-1 font-semibold text-white">{{ turno.fecha|date:'d/m/Y' }}</dd></div><div class="text-right"><dt class="flex items-center justify-end gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Hora</dt><dd class="mt-1 font-semibold text-white">{{ turno.hora_inicio|time:'H:i' }}</dd></div></div>
+                    <div><dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='price' cls='h-3.5 w-3.5' %}Precio de cancha</dt><dd class="mt-1 font-semibold text-white">${{ turno.precio }}</dd></div>
                 </dl>
             </div>
         </section>
@@ -60,7 +60,8 @@
         <div class="rounded-xl bg-slate-900 p-5 text-white">
             <p class="text-sm font-semibold uppercase tracking-wider text-emerald-300">Reserva #{{ reserva.pk }}</p>
             <h2 class="mt-2 text-xl font-bold">{{ reserva.turno.cancha.club.denominacion }}</h2>
-            <p class="mt-2 text-sm text-slate-300">
+            <p class="mt-2 flex items-center gap-1.5 text-sm text-slate-300">
+                {% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}
                 Cancha {{ reserva.turno.cancha.identificacion }} · {{ reserva.turno.fecha|date:'d/m/Y' }} · {{ reserva.turno.hora_inicio|time:'H:i' }} · ${{ reserva.turno.precio }}
             </p>
         </div>

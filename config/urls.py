@@ -24,6 +24,9 @@ from django.views.generic import RedirectView
 
 
 def demo_login(request):
+    if request.user.is_authenticated:
+        return HttpResponseRedirect('/clubes/')
+
     if request.method == 'POST':
         email = (request.POST.get('email') or request.POST.get('username') or '').strip()
         password = request.POST.get('password') or ''

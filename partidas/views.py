@@ -48,9 +48,9 @@ def crear_lobby_y_reserva(request, turno_id):
 		if not turno.esta_disponible_para_reserva():
 			messages.error(request, 'El turno seleccionado ya no está disponible.')
 			return redirect('clubes:cancha_detail', cancha_id=turno.cancha_id)
-		return render(request, 'partidas/lobby_form.html', {'form': LobbyCreateForm(), 'turno': turno})
+		return render(request, 'partidas/lobby_form.html', {'form': LobbyCreateForm(turno=turno), 'turno': turno})
 
-	form = LobbyCreateForm(request.POST)
+	form = LobbyCreateForm(request.POST, turno=turno)
 	if not form.is_valid():
 		return render(request, 'partidas/lobby_form.html', {'form': form, 'turno': turno})
 
@@ -75,7 +75,6 @@ def crear_lobby_y_reserva(request, turno_id):
 				raise DatabaseError('El turno seleccionado ya no está disponible.')
 
 			lobby = form.save(commit=False)
-			lobby.plazo_limite = timezone.now() + timedelta(days=2)
 			lobby.estado = Lobby.Estado.EN_FORMACION
 			lobby.save()
 			Reserva.objects.create(
@@ -444,9 +443,23 @@ class LobbyUpdateForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, turno=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['plazo_limite'].input_formats = ['%Y-%m-%dT%H:%M']
+        self.turno = turno
+        if turno is not None:
+            inicio_partido = timezone.make_aware(datetime.combine(turno.fecha, turno.hora_inicio))
+            self.fields['plazo_limite'].widget.attrs['max'] = inicio_partido.strftime('%Y-%m-%dT%H:%M')
+
+    def clean_plazo_limite(self):
+        plazo_limite = self.cleaned_data['plazo_limite']
+        if self.turno is not None:
+            inicio_partido = timezone.make_aware(datetime.combine(self.turno.fecha, self.turno.hora_inicio))
+            if plazo_limite >= inicio_partido:
+                raise forms.ValidationError('El plazo límite debe ser anterior al horario del partido.')
+        if plazo_limite <= timezone.now():
+            raise forms.ValidationError('El plazo límite debe ser una fecha futura.')
+        return plazo_limite
 
 
 class LobbyUpdateView(LoginRequiredMixin, UpdateView):
@@ -461,6 +474,11 @@ class LobbyUpdateView(LoginRequiredMixin, UpdateView):
 			inscripciones__jugador__usuario=self.request.user,
 			inscripciones__numero_cupo=1,
 		)
+
+	def get_form_kwargs(self):
+		kwargs = super().get_form_kwargs()
+		kwargs['turno'] = self.object.reserva.turno
+		return kwargs
 
 	def get_context_data(self, **kwargs):
 		context = super().get_context_data(**kwargs)

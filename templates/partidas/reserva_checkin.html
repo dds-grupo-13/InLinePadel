@@ -30,11 +30,11 @@
                     <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.cancha.identificacion }}</dd>
                 </div>
                 <div class="rounded-xl bg-slate-50 p-4">
-                    <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Fecha</dt>
+                    <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}Fecha</dt>
                     <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.fecha|date:'d/m/Y' }}</dd>
                 </div>
                 <div class="rounded-xl bg-slate-50 p-4">
-                    <dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Horario</dt>
+                    <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Horario</dt>
                     <dd class="mt-2 text-base font-semibold text-slate-900">{{ object.turno.hora_inicio|time:'H:i' }}</dd>
                 </div>
             </dl>

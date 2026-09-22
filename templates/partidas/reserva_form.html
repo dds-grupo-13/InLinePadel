@@ -27,15 +27,15 @@
             </div>
             <dl class="mt-6 grid gap-4 sm:grid-cols-3">
                 <div>
-                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Fecha</dt>
+                    <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{% include 'partials/_icon.html' with icon='calendar' cls='h-3.5 w-3.5' %}Fecha</dt>
                     <dd class="mt-1 font-medium text-slate-900">{{ turno.fecha|date:'d/m/Y' }}</dd>
                 </div>
                 <div>
-                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Hora</dt>
+                    <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Hora</dt>
                     <dd class="mt-1 font-medium text-slate-900">{{ turno.hora_inicio|time:'H:i' }}</dd>
                 </div>
                 <div>
-                    <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Precio</dt>
+                    <dt class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{% include 'partials/_icon.html' with icon='price' cls='h-3.5 w-3.5' %}Precio</dt>
                     <dd class="mt-1 font-medium text-slate-900">${{ turno.precio }}</dd>
                 </div>
             </dl>

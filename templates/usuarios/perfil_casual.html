@@ -5,18 +5,20 @@
 {% block content %}
 <main class="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
     <header class="mb-8 rounded-2xl bg-slate-900 px-6 py-8 text-white shadow-lg sm:px-8">
-        <p class="text-sm font-semibold uppercase tracking-widest text-emerald-300">Perfil casual</p>
-        <h1 class="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Tu perfil</h1>
-        <p class="mt-2 text-slate-300">Editá tus datos personales y gestioná tus contactos.</p>
-    </header>
-
-    {% if messages %}
-        <div class="mb-6 space-y-2">
-            {% for message in messages %}
-                <p class="rounded-lg {% if message.tags == 'error' %}bg-red-50 text-red-700{% else %}bg-emerald-50 text-emerald-700{% endif %} px-4 py-3 text-sm font-medium">{{ message }}</p>
-            {% endfor %}
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-widest text-emerald-300">Perfil casual</p>
+                <h1 class="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Tu perfil</h1>
+                <p class="mt-2 text-slate-300">Editá tus datos personales y gestioná tus contactos.</p>
+            </div>
+            <form method="post" action="{% url 'logout' %}" class="shrink-0">
+                {% csrf_token %}
+                <button type="submit" class="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
+                    Cerrar sesión
+                </button>
+            </form>
         </div>
-    {% endif %}
+    </header>
 
     <div class="grid gap-6 lg:grid-cols-2">
         <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="datos-heading">
@@ -70,7 +72,7 @@
                 <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
                     <div>
                         <span class="font-medium text-slate-900">{{ amigo.nombre }} {{ amigo.apellido }}</span>
-                        <span class="text-sm text-slate-500 ml-2">{{ amigo.zona }}</span>
+                        <span class="ml-2 inline-flex items-center gap-1 text-sm text-slate-500">{% include 'partials/_icon.html' with icon='pin' cls='h-3.5 w-3.5' %}{{ amigo.zona }}</span>
                     </div>
                     <form method="post" action="{% url 'usuarios:perfil_remover_contacto' %}" class="shrink-0">
                         {% csrf_token %}
@@ -91,7 +93,7 @@
                 <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
                     <div>
                         <span class="font-medium text-slate-900">{{ amigo.nombre }} {{ amigo.apellido }}</span>
-                        <span class="text-sm text-slate-500 ml-2">{{ amigo.zona }}</span>
+                        <span class="ml-2 inline-flex items-center gap-1 text-sm text-slate-500">{% include 'partials/_icon.html' with icon='pin' cls='h-3.5 w-3.5' %}{{ amigo.zona }}</span>
                     </div>
                     <form method="post" action="{% url 'usuarios:perfil_remover_contacto' %}" class="shrink-0">
                         {% csrf_token %}

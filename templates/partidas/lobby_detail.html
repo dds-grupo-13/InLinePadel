@@ -23,15 +23,15 @@
             </div>
             <dl class="mt-6 grid gap-4 text-sm text-slate-300 sm:grid-cols-3">
                 <div>
-                    <dt class="text-slate-400">Privacidad</dt>
+                    <dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='pin' cls='h-3.5 w-3.5' %}Privacidad</dt>
                     <dd class="mt-1 font-medium text-white">{{ lobby.get_privacidad_display }}</dd>
                 </div>
                 <div>
-                    <dt class="text-slate-400">Plazo límite</dt>
+                    <dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='clock' cls='h-3.5 w-3.5' %}Plazo límite</dt>
                     <dd class="mt-1 font-medium text-white">{{ lobby.plazo_limite|date:'d/m/Y H:i' }}</dd>
                 </div>
                 <div>
-                    <dt class="text-slate-400">Inscripciones</dt>
+                    <dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='users' cls='h-3.5 w-3.5' %}Inscripciones</dt>
                     <dd class="mt-1 font-medium text-white">{{ inscripciones|length }} / 4 jugadores</dd>
                 </div>
             </dl>

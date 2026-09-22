@@ -1,102 +1,82 @@
 {% extends 'base.html' %}
 
+{% block title %}Enviar invitación | InLine Padel{% endblock %}
+
 {% block content %}
-<div class="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 py-12 px-4 sm:px-6 lg:px-8">
-	<div class="max-w-2xl mx-auto">
-		<!-- Header -->
-		<div class="mb-8">
-			<h1 class="text-3xl font-bold text-slate-900 mb-2">Enviar invitación</h1>
-			<p class="text-slate-600">Invita a un jugador a unirse a este partido</p>
-		</div>
+<main class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <header class="bg-slate-900 px-6 py-8 text-white sm:px-8">
+            <p class="text-sm font-semibold uppercase tracking-widest text-emerald-300">Lobby #{{ lobby.pk }}</p>
+            <h1 class="mt-2 text-3xl font-bold tracking-tight">Enviar invitación</h1>
+            <p class="mt-3 text-slate-300">Invitá a un jugador a unirse a este partido.</p>
+            <dl class="mt-6 grid gap-4 text-sm text-slate-300 sm:grid-cols-4">
+                <div>
+                    <dt class="text-slate-400">Privacidad</dt>
+                    <dd class="mt-1 font-medium text-white">{{ lobby.get_privacidad_display }}</dd>
+                </div>
+                <div>
+                    <dt class="text-slate-400">Estado</dt>
+                    <dd class="mt-1 font-medium text-white">{{ lobby.get_estado_display }}</dd>
+                </div>
+                <div>
+                    <dt class="text-slate-400">Rango de jugadores</dt>
+                    <dd class="mt-1 font-medium text-white">{{ lobby.rango_min }} - {{ lobby.rango_max }}</dd>
+                </div>
+                <div>
+                    <dt class="flex items-center gap-1.5 text-slate-400">{% include 'partials/_icon.html' with icon='users' cls='h-3.5 w-3.5' %}Cupos disponibles</dt>
+                    <dd class="mt-1 font-medium text-white">{{ cupos_disponibles }} de 4</dd>
+                </div>
+            </dl>
+        </header>
 
-		<!-- Resumen del Lobby -->
-		<div class="bg-white rounded-lg shadow-md border-l-4 border-emerald-500 p-6 mb-8">
-			<h2 class="text-lg font-semibold text-slate-900 mb-4">Resumen del partido</h2>
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-				<div>
-					<p class="text-sm font-medium text-slate-600">Privacidad</p>
-					<p class="text-base font-semibold text-slate-900">{{ lobby.get_privacidad_display }}</p>
-				</div>
-				<div>
-					<p class="text-sm font-medium text-slate-600">Estado</p>
-					<p class="text-base font-semibold text-slate-900">{{ lobby.get_estado_display }}</p>
-				</div>
-				<div>
-					<p class="text-sm font-medium text-slate-600">Rango de jugadores</p>
-					<p class="text-base font-semibold text-slate-900">{{ lobby.rango_min }} - {{ lobby.rango_max }}</p>
-				</div>
-				<div>
-					<p class="text-sm font-medium text-slate-600">Cupos disponibles</p>
-					<p class="text-base font-semibold text-emerald-600">{{ cupos_disponibles }} de {{ 4 }}</p>
-				</div>
-			</div>
+        <div class="space-y-8 px-6 py-8 sm:px-8">
+            <section aria-labelledby="jugadores-heading">
+                <h2 id="jugadores-heading" class="text-xl font-bold text-slate-900">Jugadores confirmados</h2>
+                {% if inscripciones %}
+                    <ul class="mt-4 divide-y divide-slate-200 rounded-xl border border-slate-200">
+                        {% for inscripcion in inscripciones %}
+                            <li class="flex items-center justify-between gap-4 px-4 py-3">
+                                <span class="font-medium text-slate-800">
+                                    {{ inscripcion.jugador.usuario.email }}
+                                    {% if inscripcion.numero_cupo == 1 %}
+                                        <span class="ml-2 inline-block rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Capitán</span>
+                                    {% endif %}
+                                </span>
+                                <span class="text-sm text-slate-500">Cupo {{ inscripcion.numero_cupo }}</span>
+                            </li>
+                        {% empty %}
+                            <li class="px-4 py-3 text-sm text-slate-500">No hay jugadores confirmados aún.</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="mt-4 text-sm text-slate-600">No hay jugadores confirmados aún.</p>
+                {% endif %}
+            </section>
 
-			<!-- Jugadores actuales -->
-			<div class="mt-6 pt-6 border-t border-slate-200">
-				<p class="text-sm font-medium text-slate-600 mb-3">Jugadores confirmados</p>
-				<div class="space-y-2">
-					{% for inscripcion in inscripciones %}
-						<div class="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-3">
-							<span class="font-medium text-slate-900">
-								{{ inscripcion.jugador.usuario.email }}
-								{% if inscripcion.numero_cupo == 1 %}
-									<span class="ml-2 inline-block px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">Capitán</span>
-								{% endif %}
-							</span>
-							<span class="text-sm text-slate-600">Cupo {{ inscripcion.numero_cupo }}</span>
-						</div>
-					{% empty %}
-						<p class="text-sm text-slate-500 italic">No hay jugadores confirmados aún</p>
-					{% endfor %}
-				</div>
-			</div>
-		</div>
+            <section aria-labelledby="invitar-heading">
+                <h2 id="invitar-heading" class="text-xl font-bold text-slate-900">Datos de la invitación</h2>
+                <form method="post" class="mt-6 space-y-5">
+                    {% csrf_token %}
+                    {% if form.non_field_errors %}
+                        <div class="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{{ form.non_field_errors }}</div>
+                    {% endif %}
 
-		<!-- Formulario de invitación -->
-		<div class="bg-white rounded-lg shadow-md p-8">
-			<form method="post" class="space-y-6">
-				{% csrf_token %}
+                    <div>
+                        <label for="{{ form.jugador.id_for_label }}" class="block text-sm font-semibold text-slate-700">{{ form.jugador.label }}</label>
+                        <div class="mt-2">{{ form.jugador }}</div>
+                        {% if form.jugador.help_text %}
+                            <p class="mt-1 text-xs text-slate-500">{{ form.jugador.help_text }}</p>
+                        {% endif %}
+                        {% for error in form.jugador.errors %}<p class="mt-1 text-sm text-red-600">{{ error }}</p>{% endfor %}
+                    </div>
 
-				<!-- Campo de selección de jugador -->
-				<div>
-					<label for="{{ form.jugador.id_for_label }}" class="block text-sm font-medium text-slate-900 mb-2">
-						{{ form.jugador.label }}
-					</label>
-					{% if form.jugador.errors %}
-						<div class="mb-2 text-sm text-red-600">
-							{{ form.jugador.errors }}
-						</div>
-					{% endif %}
-					{{ form.jugador }}
-					{% if form.jugador.help_text %}
-						<p class="mt-2 text-sm text-slate-500">{{ form.jugador.help_text }}</p>
-					{% endif %}
-				</div>
-
-				<!-- Errores no vinculados a campos -->
-				{% if form.non_field_errors %}
-					<div class="bg-red-50 border border-red-200 rounded-lg p-4">
-						<p class="text-sm font-medium text-red-800">{{ form.non_field_errors }}</p>
-					</div>
-				{% endif %}
-
-				<!-- Botones de acción -->
-				<div class="flex justify-between items-center pt-6 border-t border-slate-200">
-					<a href="{% url 'partidas:lobby_detail' lobby.pk %}" class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
-						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
-						</svg>
-						Volver
-					</a>
-					<button type="submit" class="inline-flex items-center px-6 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">
-						<svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8m0 8l-4-2m4 2l4-2"/>
-						</svg>
-						Enviar invitación
-					</button>
-				</div>
-			</form>
-		</div>
-	</div>
-</div>
+                    <div class="flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-end">
+                        <a href="{% url 'partidas:lobby_detail' pk=lobby.pk %}" class="rounded-lg border border-slate-300 px-5 py-3 text-center font-semibold text-slate-700 hover:bg-slate-50">Volver</a>
+                        <button type="submit" class="rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">Enviar invitación</button>
+                    </div>
+                </form>
+            </section>
+        </div>
+    </section>
+</main>
 {% endblock %}

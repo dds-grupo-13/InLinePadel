@@ -5,21 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}InLine Padel{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media (prefers-reduced-motion: no-preference) {
+            @keyframes page-fade-in {
+                from { opacity: 0; transform: translateY(6px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            body > main,
+            body > div.min-h-screen {
+                animation: page-fade-in .4s ease-out both;
+            }
+
+            @keyframes toast-in {
+                from { opacity: 0; transform: translateX(1rem); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+            .toast-item {
+                animation: toast-in .3s ease-out both;
+                transition: opacity .3s ease, transform .3s ease;
+            }
+        }
+    </style>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900">
-    {% if request.user.is_authenticated %}
+    {% if request.user.is_authenticated and request.resolver_match.url_name != 'login' %}
         <nav class="border-b border-slate-200 bg-white" aria-label="Navegación principal">
             <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
                 <a href="{% url 'clubes:club_list' %}" class="text-lg font-bold tracking-tight text-slate-900">InLine Padel</a>
                 <a href="{% url 'usuarios:perfil' %}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
-                    <svg class="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19a6 6 0 0 0-12 0m6-8a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm5 2h5m-2-2v4" />
-                    </svg>
+                    {% include 'partials/_icon.html' with icon='user-plus' cls='h-4 w-4' %}
                     <span>Mi perfil</span>
                 </a>
             </div>
         </nav>
     {% endif %}
+
+    {% if messages and request.resolver_match.url_name != 'login' %}
+        <div id="toast-container" class="fixed right-4 top-4 z-[100] flex w-full max-w-sm flex-col gap-2">
+            {% for message in messages %}
+                <div class="toast-item flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg {% if message.tags == 'error' %}border-red-200 bg-red-50 text-red-700{% else %}border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+                    {% if message.tags == 'error' %}
+                        {% include 'partials/_icon.html' with icon='alert-circle' cls='h-5 w-5 mt-0.5' %}
+                    {% else %}
+                        {% include 'partials/_icon.html' with icon='check-circle' cls='h-5 w-5 mt-0.5' %}
+                    {% endif %}
+                    <p class="flex-1 pt-0.5 text-sm font-medium">{{ message }}</p>
+                    <button type="button" data-toast-close aria-label="Cerrar notificación" class="shrink-0 rounded p-0.5 text-current/70 transition hover:text-current">
+                        {% include 'partials/_icon.html' with icon='close' cls='h-4 w-4' %}
+                    </button>
+                </div>
+            {% endfor %}
+        </div>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                var items = document.querySelectorAll('.toast-item');
+                items.forEach(function (item, index) {
+                    var dismiss = function () {
+                        item.style.opacity = '0';
+                        item.style.transform = 'translateX(1rem)';
+                        setTimeout(function () { item.remove(); }, 300);
+                    };
+                    var timer = setTimeout(dismiss, 4500 + index * 300);
+                    var closeBtn = item.querySelector('[data-toast-close]');
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', function () {
+                            clearTimeout(timer);
+                            dismiss();
+                        });
+                    }
+                });
+            });
+        </script>
+    {% endif %}
+
     {% block content %}{% endblock %}
 </body>
 </html>
