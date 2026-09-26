@@ -199,11 +199,6 @@ class LobbyDetailView(DetailView):
 			and capitan is not None
 			and capitan.jugador_id == jugador.pk
 		)
-		context['solicitudes_pendientes'] = list(
-			lobby.solicitudes.filter(estado=SolicitudAcceso.Estado.PENDIENTE)
-			.select_related('jugador__usuario')
-			.order_by('fecha')
-		)
 		context['cupos'] = [
 			{'numero': numero, 'ocupado': numero <= len(inscripciones)}
 			for numero in range(1, Lobby.CANTIDAD_CUPOS + 1)

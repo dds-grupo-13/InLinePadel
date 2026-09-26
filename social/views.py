@@ -3,13 +3,16 @@ from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
-from django.views.generic import CreateView
+from django.views import View
+from django.views.generic import CreateView, ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
+import uuid
 
-from partidas.models import Inscripcion, Lobby
+from clubes.models import Turno
+from partidas.models import Inscripcion, Lobby, Reserva
 from usuarios.models import Jugador
 
-from .models import Invitacion
+from .models import Contacto, Invitacion
 
 
 class InvitacionForm(forms.ModelForm):
@@ -23,15 +26,36 @@ class InvitacionForm(forms.ModelForm):
 			}),
 		}
 
-	def __init__(self, *args, **kwargs):
+	def __init__(self, *args, jugador_actual=None, **kwargs):
 		super().__init__(*args, **kwargs)
-		self.fields['jugador'].queryset = Jugador.objects.select_related('usuario').all()
+		if jugador_actual:
+			from django.db.models import Q
+
+			contactos_ids = Contacto.objects.filter(
+				Q(jugador=jugador_actual) | Q(contacto=jugador_actual),
+				estado=Contacto.Estado.ACEPTADO,
+			).values_list('jugador', 'contacto')
+
+			ids = set()
+			for jugador_id, contacto_id in contactos_ids:
+				ids.add(jugador_id)
+				ids.add(contacto_id)
+			ids.discard(jugador_actual.pk)
+
+			self.fields['jugador'].queryset = self.fields['jugador'].queryset.filter(
+				pk__in=ids
+			).order_by('nombre', 'apellido')
 
 
 class InvitacionCreateView(LoginRequiredMixin, CreateView):
 	model = Invitacion
 	form_class = InvitacionForm
 	template_name = 'social/invitacion_form.html'
+
+	def get_form_kwargs(self):
+		kwargs = super().get_form_kwargs()
+		kwargs['jugador_actual'] = getattr(self.request.user, 'jugador', None)
+		return kwargs
 
 	def dispatch(self, request, *args, **kwargs):
 		"""
@@ -104,3 +128,95 @@ class InvitacionCreateView(LoginRequiredMixin, CreateView):
 
 	def get_success_url(self):
 		return reverse_lazy('partidas:lobby_detail', kwargs={'pk': self.kwargs['lobby_id']})
+
+
+class InvitacionesListView(LoginRequiredMixin, ListView):
+	template_name = 'social/invitaciones_list.html'
+	context_object_name = 'invitaciones'
+
+	def get_queryset(self):
+		return Invitacion.objects.filter(
+			jugador__usuario=self.request.user,
+			estado=Invitacion.Estado.PENDIENTE,
+		).select_related('lobby__reserva__turno__cancha__club', 'emisor')
+
+
+class ProcesarInvitacionView(LoginRequiredMixin, View):
+	def post(self, request, *args, **kwargs):
+		jugador = getattr(request.user, 'jugador', None)
+		if jugador is None:
+			messages.error(request, 'Necesitás tener un perfil de jugador para procesar invitaciones.')
+			return redirect('social:mis_invitaciones')
+
+		invitacion_id = request.POST.get('invitacion_id')
+		accion = request.POST.get('accion')
+		invitacion = get_object_or_404(
+			Invitacion,
+			pk=invitacion_id,
+			jugador=jugador,
+			estado=Invitacion.Estado.PENDIENTE,
+		)
+
+		if accion == 'rechazar':
+			invitacion.estado = Invitacion.Estado.RECHAZADA
+			invitacion.save(update_fields=['estado'])
+			messages.success(request, 'La invitación fue rechazada.')
+			return redirect('social:mis_invitaciones')
+
+		if accion != 'aceptar':
+			messages.error(request, 'La acción solicitada no es válida.')
+			return redirect('social:mis_invitaciones')
+
+		with transaction.atomic():
+			invitacion = get_object_or_404(
+				Invitacion.objects.select_for_update(),
+				pk=invitacion.pk,
+				jugador=jugador,
+				estado=Invitacion.Estado.PENDIENTE,
+			)
+			lobby = Lobby.objects.select_for_update().get(pk=invitacion.lobby_id)
+			inscripciones = list(
+				Inscripcion.objects.select_for_update().filter(lobby=lobby)
+			)
+
+			if (
+				len(inscripciones) >= Lobby.CANTIDAD_CUPOS
+				or lobby.estado != Lobby.Estado.EN_FORMACION
+			):
+				invitacion.estado = Invitacion.Estado.EXPIRADA
+				invitacion.save(update_fields=['estado'])
+				messages.error(
+					request,
+					'El lobby ya no está disponible para aceptar invitaciones.',
+				)
+				return redirect('social:mis_invitaciones')
+
+			cupos_ocupados = {inscripcion.numero_cupo for inscripcion in inscripciones}
+			numero_cupo = next(
+				numero for numero in range(1, Lobby.CANTIDAD_CUPOS + 1)
+				if numero not in cupos_ocupados
+			)
+			Inscripcion.objects.create(
+				lobby=lobby,
+				jugador=jugador,
+				numero_cupo=numero_cupo,
+				rol=Inscripcion.Rol.JUGADOR,
+			)
+			invitacion.estado = Invitacion.Estado.ACEPTADA
+			invitacion.save(update_fields=['estado'])
+
+			if len(inscripciones) + 1 == Lobby.CANTIDAD_CUPOS:
+				lobby.estado = Lobby.Estado.COMPLETO
+				lobby.save(update_fields=['estado'])
+
+				reserva = Reserva.objects.select_for_update().get(pk=lobby.reserva_id)
+				reserva.estado = Reserva.Estado.CONFIRMADA
+				reserva.codigo_reserva = f'RES-{uuid.uuid4().hex[:12].upper()}'
+				reserva.save(update_fields=['estado', 'codigo_reserva'])
+
+				turno = Turno.objects.select_for_update().get(pk=reserva.turno_id)
+				turno.estado = Turno.Estado.CONFIRMADO
+				turno.save(update_fields=['estado'])
+
+		messages.success(request, 'Aceptaste la invitación y te uniste al lobby.')
+		return redirect('social:mis_invitaciones')

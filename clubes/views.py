@@ -28,7 +28,7 @@ class ClubListView(ListView):
 			lobbies_por_club[club.pk] = lobbies_por_club.get(club.pk, 0) + 1
 
 		for club in clubs:
-			club.canchas_disponibles = club.canchas.exists()
+			club.canchas_disponibles = bool(club.canchas.all())
 			club.lobbies_abiertos = lobbies_por_club.get(club.pk, 0)
 
 		return clubs
