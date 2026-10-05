@@ -7,7 +7,7 @@ from django.utils import timezone
 from partidas.models import Inscripcion, Lobby
 from usuarios.models import Jugador, Usuario
 
-from .models import Invitacion
+from .models import Contacto, Invitacion
 
 
 class InvitacionCreateViewTests(TestCase):
@@ -35,16 +35,21 @@ class InvitacionCreateViewTests(TestCase):
             apellido='Jugador',
             zona='Sur',
         )
+        Contacto.objects.create(
+            jugador=self.capitan,
+            contacto=self.jugador_invitar,
+            estado=Contacto.Estado.ACEPTADO,
+        )
 
         self.lobby = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=1),
+            capitan=self.capitan,
         )
         Inscripcion.objects.create(
             lobby=self.lobby,
             jugador=self.capitan,
             numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
         )
 
     def test_capitan_puede_enviar_invitacion(self):
@@ -89,7 +94,6 @@ class InvitacionCreateViewTests(TestCase):
             lobby=self.lobby,
             jugador=self.jugador_invitar,
             numero_cupo=2,
-            rol=Inscripcion.Rol.JUGADOR,
         )
 
         self.client.force_login(self.capitan_user)

@@ -59,7 +59,7 @@ def crear_lobby_y_reserva(request, turno_id):
 			jugador = Jugador.objects.select_for_update().get(pk=jugador.pk)
 			reservas_activas = Inscripcion.objects.filter(
 				jugador=jugador,
-				rol=Inscripcion.Rol.CAPITAN,
+				lobby__capitan=jugador,
 				lobby__estado__in=[Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO],
 				lobby__reserva__estado__in=[Reserva.Estado.PROVISORIA, Reserva.Estado.CONFIRMADA],
 			).count()
@@ -75,6 +75,7 @@ def crear_lobby_y_reserva(request, turno_id):
 				raise DatabaseError('El turno seleccionado ya no está disponible.')
 
 			lobby = form.save(commit=False)
+			lobby.capitan = jugador
 			lobby.plazo_limite = timezone.now() + timedelta(days=2)
 			lobby.estado = Lobby.Estado.EN_FORMACION
 			lobby.save()
@@ -90,7 +91,6 @@ def crear_lobby_y_reserva(request, turno_id):
 				lobby=lobby,
 				jugador=jugador,
 				numero_cupo=1,
-				rol=Inscripcion.Rol.CAPITAN,
 			)
 	except DatabaseError:
 		messages.error(request, 'El turno ya no está disponible. Elegí otro turno.')
@@ -177,7 +177,6 @@ class LobbyDetailView(DetailView):
 		lobby = self.object
 		inscripciones = list(lobby.inscripciones.select_related('jugador').all())
 		jugador = getattr(self.request.user, 'jugador', None)
-		capitan = lobby.inscripciones.filter(numero_cupo=1).select_related('jugador__usuario').first()
 
 		context['inscripciones'] = inscripciones
 		context['cupos_disponibles'] = max(
@@ -196,8 +195,7 @@ class LobbyDetailView(DetailView):
 		)
 		context['es_capitan'] = (
 			jugador is not None
-			and capitan is not None
-			and capitan.jugador_id == jugador.pk
+			and lobby.capitan_id == jugador.pk
 		)
 		context['cupos'] = [
 			{'numero': numero, 'ocupado': numero <= len(inscripciones)}
@@ -218,12 +216,7 @@ class AceptarSolicitudView(LoginRequiredMixin, View):
 			pk=self.kwargs['pk'],
 		)
 
-		capitan = get_object_or_404(
-			Inscripcion.objects.select_related('jugador__usuario'),
-			lobby=solicitud.lobby,
-			numero_cupo=1,
-		)
-		if capitan.jugador_id != jugador.pk:
+		if solicitud.lobby.capitan_id != jugador.pk:
 			messages.error(request, 'Solo el capitán del lobby puede aceptar solicitudes.')
 			return redirect('partidas:lobby_detail', pk=solicitud.lobby_id)
 
@@ -258,7 +251,6 @@ class AceptarSolicitudView(LoginRequiredMixin, View):
 				lobby=lobby,
 				jugador=solicitud.jugador,
 				numero_cupo=nuevo_cupo,
-				rol=Inscripcion.Rol.JUGADOR,
 			)
 			solicitud.estado = SolicitudAcceso.Estado.ACEPTADA
 			solicitud.save(update_fields=['estado'])
@@ -354,7 +346,6 @@ class InscripcionCreateView(LoginRequiredMixin, CreateView):
 				lobby=lobby,
 				jugador=jugador,
 				numero_cupo=numero_cupo,
-				rol=Inscripcion.Rol.JUGADOR,
 			)
 
 			if len(inscripciones) + 1 == Lobby.CANTIDAD_CUPOS:
@@ -454,7 +445,7 @@ class LobbyUpdateView(LoginRequiredMixin, UpdateView):
 			Lobby.objects.select_related('reserva__turno__cancha__club'),
 			reserva__pk=self.kwargs['reserva_id'],
 			inscripciones__jugador__usuario=self.request.user,
-			inscripciones__numero_cupo=1,
+			capitan__usuario=self.request.user,
 		)
 
 	def get_context_data(self, **kwargs):
@@ -463,7 +454,7 @@ class LobbyUpdateView(LoginRequiredMixin, UpdateView):
 			Reserva.objects.select_related('turno__cancha__club'),
 			pk=self.kwargs['reserva_id'],
 			lobby__inscripciones__jugador__usuario=self.request.user,
-			lobby__inscripciones__numero_cupo=1,
+			lobby__capitan__usuario=self.request.user,
 		)
 		return context
 
@@ -474,7 +465,7 @@ class LobbyUpdateView(LoginRequiredMixin, UpdateView):
 				pk=self.object.pk,
 				reserva__pk=self.kwargs['reserva_id'],
 				inscripciones__jugador__usuario=self.request.user,
-				inscripciones__numero_cupo=1,
+				capitan__usuario=self.request.user,
 			)
 			if lobby.estado != Lobby.Estado.EN_FORMACION:
 				form.add_error(None, 'Solo se puede configurar un lobby en formación.')
@@ -497,13 +488,13 @@ class ReservaCancelView(LoginRequiredMixin, DetailView):
 	def get_object(self, queryset=None):
 		"""
 		Recupera de forma segura la reserva verificando que el usuario autenticado
-		sea el capitán del lobby asociado (numero_cupo=1) para prevenir BOLA.
+		sea el capitán del lobby asociado para prevenir BOLA.
 		"""
 		return get_object_or_404(
 			Reserva.objects.select_related('lobby', 'turno__cancha__club'),
 			pk=self.kwargs['pk'],
 			lobby__inscripciones__jugador__usuario=self.request.user,
-			lobby__inscripciones__numero_cupo=1,
+			lobby__capitan__usuario=self.request.user,
 		)
 
 	def post(self, request, *args, **kwargs):
@@ -542,7 +533,7 @@ class ReservaCheckInView(LoginRequiredMixin, View):
 			Reserva.objects.select_related('lobby', 'turno__cancha__club'),
 			pk=self.kwargs['pk'],
 			lobby__inscripciones__jugador__usuario=request.user,
-			lobby__inscripciones__numero_cupo=1,
+			lobby__capitan__usuario=request.user,
 		)
 		if reserva.estado != Reserva.Estado.CONFIRMADA:
 			messages.error(request, 'La reserva solo puede hacer check-in si está confirmada.')
@@ -570,7 +561,7 @@ class ReservaCheckInView(LoginRequiredMixin, View):
 		if not Inscripcion.objects.filter(
 			lobby=reserva.lobby,
 			jugador=jugador,
-			numero_cupo=1,
+			lobby__capitan=jugador,
 		).exists():
 			messages.error(request, 'Solo el capitán del lobby puede registrar el check-in.')
 			return redirect('partidas:mis_partidos')

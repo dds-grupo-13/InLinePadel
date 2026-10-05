@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from clubes.models import Club, Cancha, Turno
 from social.models import SolicitudAcceso
-from usuarios.models import AdminSistema, Jugador, Usuario
+from usuarios.models import AdminClub, AdminSistema, Jugador, Usuario
 
 from .models import Inscripcion, Lobby, Reserva
 
@@ -32,12 +32,12 @@ class AceptarSolicitudViewTests(TestCase):
         self.lobby = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=1),
+            capitan=self.capitan,
         )
         Inscripcion.objects.create(
             lobby=self.lobby,
             jugador=self.capitan,
             numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
         )
         self.solicitud = SolicitudAcceso.objects.create(
             lobby=self.lobby,
@@ -77,12 +77,15 @@ class InscripcionCreateViewTests(TestCase):
         self.lobby = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=1),
+            capitan=self.jugador,
         )
         admin = Usuario.objects.create_user(email='admin@example.com', password='secret123')
+        admin_club = AdminClub.objects.create(usuario=admin)
         club = Club.objects.create(
             denominacion='Club Test',
             direccion='Calle Falsa 123',
             zona='Centro',
+            admin=admin_club,
             habilitado_por=AdminSistema.objects.create(usuario=admin),
         )
         cancha = Cancha.objects.create(
@@ -117,12 +120,14 @@ class ReservaCancelViewTests(TestCase):
         # Crear admin del sistema
         self.admin_user = Usuario.objects.create_user(email='admin@example.com', password='secret123')
         self.admin_sistema = AdminSistema.objects.create(usuario=self.admin_user)
+        self.admin_club = AdminClub.objects.create(usuario=self.admin_user)
 
         # Crear club y cancha
         self.club = Club.objects.create(
             denominacion='Club de Padel Test',
             direccion='Calle Principal 123',
             zona='Centro',
+            admin=self.admin_club,
             habilitado_por=self.admin_sistema,
         )
         self.cancha = Cancha.objects.create(
@@ -153,6 +158,7 @@ class ReservaCancelViewTests(TestCase):
         self.lobby = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=1),
+            capitan=self.capitan,
         )
         self.reserva = Reserva.objects.create(
             lobby=self.lobby,
@@ -164,7 +170,6 @@ class ReservaCancelViewTests(TestCase):
             lobby=self.lobby,
             jugador=self.capitan,
             numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
         )
 
     def test_capitan_puede_cancelar_reserva(self):
@@ -203,7 +208,6 @@ class ReservaCancelViewTests(TestCase):
             lobby=self.lobby,
             jugador=otro_jugador,
             numero_cupo=2,
-            rol=Inscripcion.Rol.JUGADOR,
         )
 
         self.client.force_login(otro_user)
@@ -233,10 +237,12 @@ class ReservaCheckInViewTests(TestCase):
     def setUp(self):
         self.admin_user = Usuario.objects.create_user(email='admin_checkin@example.com', password='secret123')
         self.admin_sistema = AdminSistema.objects.create(usuario=self.admin_user)
+        self.admin_club = AdminClub.objects.create(usuario=self.admin_user)
         self.club = Club.objects.create(
             denominacion='Club Check-In',
             direccion='Calle Check 123',
             zona='Centro',
+            admin=self.admin_club,
             habilitado_por=self.admin_sistema,
         )
         self.cancha = Cancha.objects.create(
@@ -261,6 +267,7 @@ class ReservaCheckInViewTests(TestCase):
         self.lobby = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=1),
+            capitan=self.capitan,
         )
         self.reserva = Reserva.objects.create(
             lobby=self.lobby,
@@ -272,7 +279,6 @@ class ReservaCheckInViewTests(TestCase):
             lobby=self.lobby,
             jugador=self.capitan,
             numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
         )
 
     def test_capitan_puede_hacer_check_in_de_reserva_confirmada(self):
@@ -297,6 +303,7 @@ class ReservaCheckInViewTests(TestCase):
         lobby_provisoria = Lobby.objects.create(
             privacidad=Lobby.Privacidad.PUBLICO,
             plazo_limite=timezone.now() + timedelta(days=2),
+            capitan=self.capitan,
         )
         reserva_provisoria = Reserva.objects.create(
             lobby=lobby_provisoria,

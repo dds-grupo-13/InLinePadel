@@ -19,6 +19,11 @@ class Club(models.Model):
         choices=Estado.choices,
         default=Estado.ACTIVO,
     )
+    admin = models.OneToOneField(
+        "usuarios.AdminClub",
+        on_delete=models.RESTRICT,
+        related_name="club",
+    )
 
     habilitado_por = models.ForeignKey(
         "usuarios.AdminSistema",

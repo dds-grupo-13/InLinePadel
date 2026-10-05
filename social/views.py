@@ -67,9 +67,7 @@ class InvitacionCreateView(LoginRequiredMixin, CreateView):
 			return redirect('partidas:lobby_list')
 
 		lobby = get_object_or_404(Lobby, pk=self.kwargs['lobby_id'])
-		capitan = lobby.inscripciones.filter(numero_cupo=1).select_related('jugador').first()
-
-		if capitan is None or capitan.jugador_id != jugador.pk:
+		if lobby.capitan_id != jugador.pk:
 			messages.error(request, 'Solo el capitán del lobby puede enviar invitaciones.')
 			return redirect('partidas:lobby_detail', pk=lobby.pk)
 
@@ -200,7 +198,6 @@ class ProcesarInvitacionView(LoginRequiredMixin, View):
 				lobby=lobby,
 				jugador=jugador,
 				numero_cupo=numero_cupo,
-				rol=Inscripcion.Rol.JUGADOR,
 			)
 			invitacion.estado = Invitacion.Estado.ACEPTADA
 			invitacion.save(update_fields=['estado'])

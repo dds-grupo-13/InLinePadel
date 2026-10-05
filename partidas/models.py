@@ -26,6 +26,11 @@ class Lobby(models.Model):
         choices=Estado.choices,
         default=Estado.EN_FORMACION,
     )
+    capitan = models.ForeignKey(
+        "usuarios.Jugador",
+        on_delete=models.PROTECT,
+        related_name="lobbies_capitaneados",
+    )
 
     class Meta:
         verbose_name = "Lobby"
@@ -33,11 +38,6 @@ class Lobby(models.Model):
 
     def __str__(self):
         return f"Lobby #{self.pk} [{self.estado}]"
-
-    @property
-    def capitan(self):
-        insc = self.inscripciones.filter(rol=Inscripcion.Rol.CAPITAN).first()
-        return insc.jugador if insc else None
 
     def cupos_ocupados(self) -> int:
         return self.inscripciones.count()
@@ -82,10 +82,6 @@ class Reserva(models.Model):
 
 
 class Inscripcion(models.Model):
-    class Rol(models.TextChoices):
-        CAPITAN = "CAPITAN", "Capitán"
-        JUGADOR = "JUGADOR", "Jugador"
-
     lobby = models.ForeignKey(
         Lobby,
         on_delete=models.CASCADE,
@@ -97,7 +93,6 @@ class Inscripcion(models.Model):
         related_name="inscripciones",
     )
     numero_cupo = models.PositiveSmallIntegerField()
-    rol = models.CharField(max_length=8, choices=Rol.choices, default=Rol.JUGADOR)
     fecha_inscripcion = models.DateTimeField(auto_now_add=True)
 
     class Meta:

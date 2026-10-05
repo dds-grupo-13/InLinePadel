@@ -67,11 +67,6 @@ class AdminClub(models.Model):
         primary_key=True,
         related_name="admin_club",
     )
-    club = models.ForeignKey(
-        "clubes.Club",
-        on_delete=models.CASCADE,
-        related_name="administradores",
-    )
 
     class Meta:
         verbose_name = "Administrador de club"

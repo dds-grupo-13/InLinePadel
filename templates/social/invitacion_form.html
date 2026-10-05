@@ -35,7 +35,7 @@
 						<div class="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-3">
 							<span class="font-medium text-slate-900">
 								{{ inscripcion.jugador.usuario.email }}
-								{% if inscripcion.numero_cupo == 1 %}
+								{% if inscripcion.jugador_id == lobby.capitan_id %}
 									<span class="ml-2 inline-block px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">Capitán</span>
 								{% endif %}
 							</span>

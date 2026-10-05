@@ -154,6 +154,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=2),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[0],
             },
         )
         if lobby_1.pk == 1:
@@ -162,7 +163,7 @@ class Command(BaseCommand):
                 Inscripcion.objects.get_or_create(
                     lobby=lobby_1,
                     jugador=jugador,
-                    defaults={"numero_cupo": idx, "rol": Inscripcion.Rol.CAPITAN if idx == 1 else Inscripcion.Rol.JUGADOR},
+                    defaults={"numero_cupo": idx},
                 )
 
         Reserva.objects.update_or_create(
@@ -176,6 +177,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.SOLO_AMIGOS,
                 'plazo_limite': timezone.now() + timedelta(days=1),
                 'estado': Lobby.Estado.COMPLETO,
+                'capitan': captain_users[0],
             },
         )
 
@@ -185,6 +187,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=1),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[2],
             },
         )
         if lobby_3.pk == 3:
@@ -192,7 +195,7 @@ class Command(BaseCommand):
                 Inscripcion.objects.get_or_create(
                     lobby=lobby_3,
                     jugador=jugador,
-                    defaults={'numero_cupo': idx, 'rol': Inscripcion.Rol.CAPITAN if idx == 1 else Inscripcion.Rol.JUGADOR},
+                    defaults={'numero_cupo': idx},
                 )
 
         lobby_4, _ = Lobby.objects.get_or_create(
@@ -201,18 +204,19 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=3),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[0],
             },
         )
         if lobby_4.pk == 4:
             Inscripcion.objects.get_or_create(
                 lobby=lobby_4,
                 jugador=captain_users[0],
-                defaults={'numero_cupo': 1, 'rol': Inscripcion.Rol.CAPITAN},
+                defaults={'numero_cupo': 1},
             )
             Inscripcion.objects.get_or_create(
                 lobby=lobby_4,
                 jugador=captain_users[1],
-                defaults={'numero_cupo': 2, 'rol': Inscripcion.Rol.JUGADOR},
+                defaults={'numero_cupo': 2},
             )
 
         lobby_5, _ = Lobby.objects.get_or_create(
@@ -221,6 +225,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=4),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[1],
             },
         )
         if lobby_5.pk == 5:
@@ -229,7 +234,7 @@ class Command(BaseCommand):
                 Inscripcion.objects.get_or_create(
                     lobby=lobby_5,
                     jugador=jugador,
-                    defaults={'numero_cupo': idx, 'rol': Inscripcion.Rol.CAPITAN if idx == 1 else Inscripcion.Rol.JUGADOR},
+                    defaults={'numero_cupo': idx},
                 )
 
         lobby_6, _ = Lobby.objects.get_or_create(
@@ -238,6 +243,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=4),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[2],
             },
         )
         if lobby_6.pk == 6:
@@ -246,7 +252,7 @@ class Command(BaseCommand):
                 Inscripcion.objects.get_or_create(
                     lobby=lobby_6,
                     jugador=jugador,
-                    defaults={'numero_cupo': idx, 'rol': Inscripcion.Rol.CAPITAN if idx == 1 else Inscripcion.Rol.JUGADOR},
+                    defaults={'numero_cupo': idx},
                 )
 
         lobby_7, _ = Lobby.objects.get_or_create(
@@ -255,6 +261,7 @@ class Command(BaseCommand):
                 'privacidad': Lobby.Privacidad.PUBLICO,
                 'plazo_limite': timezone.now() + timedelta(days=3),
                 'estado': Lobby.Estado.EN_FORMACION,
+                'capitan': captain_users[3],
             },
         )
         if lobby_7.pk == 7:
@@ -262,7 +269,7 @@ class Command(BaseCommand):
             Inscripcion.objects.get_or_create(
                 lobby=lobby_7,
                 jugador=captain_users[3],
-                defaults={"numero_cupo": 1, "rol": Inscripcion.Rol.CAPITAN},
+                defaults={"numero_cupo": 1},
             )
 
         for lobby in [lobby_1, lobby_3, lobby_4, lobby_5, lobby_6, lobby_7]:
@@ -330,7 +337,7 @@ class Command(BaseCommand):
                 Inscripcion.objects.get_or_create(
                     lobby=lobby_2,
                     jugador=jugador,
-                    defaults={"numero_cupo": idx, "rol": Inscripcion.Rol.CAPITAN if idx == 1 else Inscripcion.Rol.JUGADOR},
+                    defaults={"numero_cupo": idx},
                 )
 
         reserva, _ = Reserva.objects.update_or_create(
