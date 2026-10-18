@@ -4,44 +4,11 @@
     "description": "API REST de InLinePadel. Autenticación por sesión (cookie): ejecutá Auth > Login primero. Las peticiones POST/PATCH/DELETE envían X-CSRFToken automáticamente desde la cookie csrftoken.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "event": [
-    {
-      "listen": "prerequest",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "const csrf = pm.cookies.get('csrftoken');",
-          "if (csrf) pm.request.headers.upsert({ key: 'X-CSRFToken', value: csrf });",
-          "pm.request.headers.upsert({ key: 'Referer', value: pm.collectionVariables.get('base_url') });"
-        ]
-      }
-    }
-  ],
+  "event": [],
   "item": [
     {
       "name": "Auth",
       "item": [
-        {
-          "name": "CSRF token",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/usuarios/auth/csrf/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "usuarios",
-                "auth",
-                "csrf",
-                ""
-              ]
-            },
-            "description": "Setea la cookie csrftoken (usada por el pre-request del colección)."
-          }
-        },
         {
           "name": "Login (jugador)",
           "request": {
@@ -74,8 +41,26 @@
                 }
               }
             },
-            "description": "Sesión por cookie. Límite: 10 intentos cada 15 min por IP."
-          }
+            "description": "JWT: guarda access/refresh en variables de colección. Límite: 10 intentos cada 15 min por IP.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login (admin de club)",
@@ -108,14 +93,91 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "JWT: guarda access/refresh en variables de colección. Límite: 10 intentos cada 15 min por IP."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
             }
-          }
+          ]
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/auth/refresh/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "auth",
+                "refresh",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Rota el refresh: devuelve nuevo access y refresh.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Logout",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/usuarios/auth/logout/",
               "host": [
@@ -128,7 +190,17 @@
                 "logout",
                 ""
               ]
-            }
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Blacklistea el refresh token."
           }
         }
       ]
@@ -166,6 +238,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           }
         },
@@ -2226,6 +2301,24 @@
     {
       "key": "codigo_reserva",
       "value": "ABCD-1234"
+    },
+    {
+      "key": "access",
+      "value": ""
+    },
+    {
+      "key": "refresh",
+      "value": ""
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access}}",
+        "type": "string"
+      }
+    ]
+  }
 }

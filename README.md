@@ -65,6 +65,22 @@ python manage.py runserver
 
 ---
 
+## Autenticación (JWT) y CORS
+
+Variable de entorno (ver `.env.example`): `CORS_ALLOWED_ORIGINS`, orígenes del frontend separados por coma (por defecto `http://localhost:4200`).
+
+Endpoints en `/api/usuarios/auth/`:
+
+| Endpoint | Body | Respuesta |
+|---|---|---|
+| `POST login/` | `username`, `password` | `access`, `refresh`, `usuario` |
+| `POST refresh/` | `refresh` | nuevo `access` y nuevo `refresh` (401 si es inválido o ya usado) |
+| `POST logout/` (con Bearer) | `refresh` | 204; el refresh queda invalidado |
+
+Las demás requests llevan `Authorization: Bearer <access>`. El access dura 15 minutos y el refresh 1 día; el refresh rota en cada uso y el anterior queda en la blacklist. Dar de baja una cuenta invalida todos sus refresh.
+
+---
+
 ## Cambios en `models.py`
 
 Si se realizan cambios en los archivos `models.py`, ejecutar:
