@@ -1,3 +1,125 @@
-from django.shortcuts import render
+from django.contrib.auth import authenticate, login, logout
+from django.middleware.csrf import get_token
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 
-# Create your views here.
+from .models import Jugador
+from .serializers import (
+    JugadorPublicoSerializer,
+    LoginSerializer,
+    RegistroJugadorSerializer,
+)
+
+
+class LoginRateThrottle(SimpleRateThrottle):
+    """10 intentos de inicio de sesión cada 15 minutos por IP (RNF05)."""
+
+    scope = "login"
+    cache_key_prefix = "login"
+
+    def parse_rate(self, rate):
+        return 10, 15 * 60
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": self.get_ident(request),
+        }
+
+
+class AuthViewSet(viewsets.ViewSet):
+    """Sesión de django.contrib.auth: login / logout / csrf."""
+
+    permission_classes = [AllowAny]
+
+    @action(detail=False, methods=["get"])
+    def csrf(self, request):
+        return Response({"csrfToken": get_token(request)})
+
+    @action(detail=False, methods=["post"], throttle_classes=[LoginRateThrottle])
+    def login(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        usuario = authenticate(request, **serializer.validated_data)
+        if usuario is None:
+            return Response(
+                {"detail": "Usuario o contraseña incorrectos."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        login(request, usuario)
+        return Response(_perfil(usuario))
+
+    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
+    def logout(self, request):
+        logout(request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _perfil(usuario):
+    datos = {
+        "id": usuario.pk,
+        "username": usuario.username,
+        "es_admin_club": usuario.is_staff and not usuario.is_superuser,
+        "es_admin_sistema": usuario.is_superuser,
+    }
+    if hasattr(usuario, "jugador"):
+        datos["jugador"] = RegistroJugadorSerializer(usuario.jugador).data
+    return datos
+
+
+class JugadorViewSet(viewsets.ModelViewSet):
+    """Registro (público), perfil propio y buscador de jugadores."""
+
+    queryset = Jugador.objects.select_related("usuario", "zona").filter(
+        usuario__is_active=True
+    )
+    filterset_fields = ["zona", "posicion"]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_serializer_class(self):
+        if self.action in ("list",) or (
+            self.action == "retrieve" and not self._es_propio()
+        ):
+            return JugadorPublicoSerializer
+        return RegistroJugadorSerializer
+
+    def _es_propio(self):
+        return str(self.kwargs.get("pk")) == str(self.request.user.pk)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == "list":
+            texto = self.request.query_params.get("q")
+            if texto:
+                qs = qs.filter(usuario__username__icontains=texto)
+            return qs.exclude(pk=self.request.user.pk)
+        return qs
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        # solo el dueño modifica su perfil (BOLA); terceros solo ven datos públicos
+        if self.action != "retrieve" and obj.pk != request.user.pk:
+            self.permission_denied(request, message="No podés modificar el perfil de otro jugador.")
+
+    def perform_destroy(self, instance):
+        instance.usuario.is_active = False
+        instance.usuario.save(update_fields=["is_active"])
+        logout(self.request)
+
+    @action(detail=False, methods=["get", "patch"])
+    def me(self, request):
+        jugador = getattr(request.user, "jugador", None)
+        if jugador is None:
+            return Response(_perfil(request.user))
+        if request.method == "PATCH":
+            serializer = RegistroJugadorSerializer(jugador, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+        return Response(_perfil(request.user))

@@ -1,5 +1,8 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
+
+from usuarios.models import Usuario
 
 from .models import Cancha, Club, Turno, Zona
 
@@ -11,14 +14,66 @@ class ZonaSerializer(serializers.ModelSerializer):
 
 
 class ClubSerializer(serializers.ModelSerializer):
+    # credenciales del admin del club, alternativa a pasar un `admin` existente
+    admin_username = serializers.CharField(write_only=True, required=False)
+    admin_email = serializers.EmailField(write_only=True, required=False)
+    admin_password = serializers.CharField(write_only=True, required=False, min_length=8)
+
     class Meta:
         model = Club
-        fields = ["id", "denominacion", "direccion", "estado", "zona", "admin"]
+        fields = [
+            "id", "denominacion", "direccion", "estado", "zona", "admin",
+            "admin_username", "admin_email", "admin_password",
+        ]
+        # el estado cambia solo con las acciones suspender/reactivar/dar_de_baja
+        read_only_fields = ["estado"]
+        extra_kwargs = {"admin": {"required": False}}
 
     def validate_admin(self, admin):
         if not admin.is_staff:
             raise serializers.ValidationError("El admin del club debe ser staff.")
         return admin
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        credenciales = ("admin_username", "admin_email", "admin_password")
+        if self.instance is None:
+            if "admin" in attrs:
+                if any(c in attrs for c in credenciales):
+                    raise serializers.ValidationError(
+                        "Indicá un admin existente o las credenciales de uno nuevo, no ambos."
+                    )
+            elif not all(c in attrs for c in credenciales):
+                raise serializers.ValidationError(
+                    "Indicá el admin del club o sus credenciales (usuario, email y contraseña)."
+                )
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        datos = {c: validated_data.pop(c, None) for c in (
+            "admin_username", "admin_email", "admin_password")}
+        if "admin" not in validated_data:
+            validated_data["admin"] = Usuario.objects.create_user(
+                username=datos["admin_username"],
+                email=datos["admin_email"],
+                password=datos["admin_password"],
+                is_staff=True,
+            )
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        for c in ("admin_username", "admin_email", "admin_password"):
+            validated_data.pop(c, None)
+        return super().update(instance, validated_data)
+
+
+def _validar_club_propio(request, club):
+    """Un admin de club solo opera sobre su propio club (RNF05)."""
+    user = request.user
+    if not user.is_superuser and club.admin_id != user.pk:
+        raise serializers.ValidationError("Solo podés operar sobre tu propio club.")
+    return club
 
 
 class CanchaSerializer(serializers.ModelSerializer):
@@ -26,15 +81,28 @@ class CanchaSerializer(serializers.ModelSerializer):
         model = Cancha
         fields = ["id", "numero", "activa", "tipo", "club"]
 
+    def validate_club(self, club):
+        return _validar_club_propio(self.context["request"], club)
+
 
 class TurnoSerializer(serializers.ModelSerializer):
+    club = serializers.IntegerField(source="cancha.club_id", read_only=True)
+    club_nombre = serializers.CharField(source="cancha.club.denominacion", read_only=True)
+    cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
+    cancha_tipo = serializers.CharField(source="cancha.tipo", read_only=True)
+
     class Meta:
         model = Turno
         fields = [
             "id", "fecha", "hora_inicio", "duracion", "precio",
             "estado", "cancha", "inicio", "fin",
+            "club", "club_nombre", "cancha_numero", "cancha_tipo",
         ]
         read_only_fields = ["inicio", "fin", "estado"]
+
+    def validate_cancha(self, cancha):
+        _validar_club_propio(self.context["request"], cancha.club)
+        return cancha
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -48,3 +116,28 @@ class TurnoSerializer(serializers.ModelSerializer):
         except DjangoValidationError as e:
             raise serializers.ValidationError(e.messages)
         return attrs
+
+
+class TurnoOcupacionSerializer(serializers.ModelSerializer):
+    """Vista del club: ocupación de un turno con su lobby y estado de reserva."""
+
+    cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
+    lobby = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Turno
+        fields = ["id", "fecha", "hora_inicio", "cancha", "cancha_numero", "estado", "lobby"]
+
+    def get_lobby(self, turno):
+        # usa el prefetch de lobbies e inscripciones (sin queries por fila)
+        lobby = next((l for l in turno.lobbies.all() if l.estado != "CANCELADO"), None)
+        if lobby is None:
+            return None
+        return {
+            "id": lobby.pk,
+            "estado": lobby.estado,
+            "privacidad": lobby.privacidad,
+            "cupos_ocupados": len(lobby.inscripciones.all()),
+            "reserva": "CONFIRMADA" if turno.estado == Turno.Estado.CONFIRMADO else "PROVISORIA",
+            "codigo_reserva": lobby.codigo_reserva,
+        }

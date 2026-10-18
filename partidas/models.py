@@ -1,5 +1,11 @@
+import secrets
+from datetime import timedelta
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
+from django.utils import timezone
+
+from config.exceptions import Conflicto
 
 # Create your models here.
 
@@ -7,6 +13,8 @@ ESTADO_CANCELADO = "CANCELADO"
 
 class Lobby(models.Model):
     CANTIDAD_CUPOS = 4
+    MAX_LOBBIES_EN_FORMACION = 2
+    HORAS_PLAZO = 48
 
     class Estado(models.TextChoices):
         EN_FORMACION = "EN_FORMACION", "En formación"
@@ -33,6 +41,11 @@ class Lobby(models.Model):
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     plazo_limite = models.DateTimeField()
     fecha_check_in = models.DateTimeField()
+
+    # se emite al ocuparse el último cupo (reserva en firme)
+    codigo_reserva = models.CharField(
+        max_length=9, unique=True, null=True, blank=True, editable=False
+    )
 
     capitan = models.ForeignKey(
         "usuarios.Jugador",
@@ -87,15 +100,50 @@ class Lobby(models.Model):
     # atómico en cualquier base y no depende de select_for_update (que SQLite ignora).
 
     @classmethod
+    def conflicto_horario(cls, jugador, turno, excluir_lobby=None):
+        """Lobby vigente del jugador cuyo turno se superpone con `turno` (o None)."""
+        vigentes = cls.objects.filter(
+            inscripciones__jugador=jugador,
+            estado__in=(cls.Estado.EN_FORMACION, cls.Estado.COMPLETO),
+            turno__inicio__lt=turno.fin,
+            turno__fin__gt=turno.inicio,
+        )
+        if excluir_lobby is not None:
+            vigentes = vigentes.exclude(pk=excluir_lobby)
+        return vigentes.select_related("turno").first()
+
+    @classmethod
     def crear(cls, turno, capitan, **campos):
         """Crea el lobby, bloquea el turno e inscribe al capitán en el cupo 1."""
         Turno = cls._meta.get_field("turno").related_model
+        # el plazo es fijo: creación + 48 h, sin pasar del horario del turno
+        campos.setdefault("fecha_check_in", turno.inicio)
+        campos.setdefault(
+            "plazo_limite",
+            min(timezone.now() + timedelta(hours=cls.HORAS_PLAZO), turno.inicio),
+        )
+        if turno.cancha.club.estado != "ACTIVO":
+            raise ValueError("El club no está habilitado para recibir reservas.")
+        en_formacion = cls.objects.filter(
+            capitan=capitan, estado=cls.Estado.EN_FORMACION
+        ).count()
+        if en_formacion >= cls.MAX_LOBBIES_EN_FORMACION:
+            raise ValueError(
+                f"Ya sos capitán de {cls.MAX_LOBBIES_EN_FORMACION} partidas en formación. "
+                "Esperá a que se completen o cancelá una."
+            )
+        superpuesto = cls.conflicto_horario(capitan, turno)
+        if superpuesto:
+            raise ValueError(
+                "Ya participás de otra partida en ese horario "
+                f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+            )
         with transaction.atomic():
             bloqueado = Turno.objects.filter(
                 pk=turno.pk, estado=Turno.Estado.LIBRE
             ).update(estado=Turno.Estado.BLOQUEADO)
             if not bloqueado:
-                raise ValueError("El turno no está libre")
+                raise Conflicto("El turno ya fue tomado por otro jugador.")
             turno.estado = Turno.Estado.BLOQUEADO
             # full_clean aplica las reglas de clean() (ej: check-in antes del turno);
             # si falla, el atomic revierte el bloqueo del turno
@@ -103,9 +151,24 @@ class Lobby(models.Model):
             lobby.full_clean()
             lobby.save()
             Inscripcion.objects.create(lobby=lobby, jugador=capitan, numero_cupo=1)
+            from social.notificaciones import notificar
+
+            notificar(
+                [turno.cancha.club.admin_id],
+                f"Turno {turno.fecha:%d/%m} {turno.hora_inicio:%H:%M} "
+                f"(cancha {turno.cancha.numero}) reservado provisoriamente.",
+            )
             return lobby
 
     def inscribir(self, jugador):
+        superpuesto = Lobby.conflicto_horario(
+            jugador, self.turno, excluir_lobby=self.pk
+        )
+        if superpuesto:
+            raise Conflicto(
+                "Ya participás de otra partida en ese horario "
+                f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+            )
         # Los unique constraints (lobby, cupo) y (lobby, jugador) garantizan la
         # consistencia ante inscripciones concurrentes; si dos toman el mismo
         # cupo, el perdedor reintenta con el siguiente libre.
@@ -113,7 +176,7 @@ class Lobby(models.Model):
             with transaction.atomic():
                 estado = Lobby.objects.values_list("estado", flat=True).get(pk=self.pk)
                 if estado != self.Estado.EN_FORMACION:
-                    raise ValueError(f"No se puede inscribir en un lobby {estado}")
+                    raise Conflicto("La partida ya no está abierta a nuevos jugadores.")
                 ocupados = set(
                     Inscripcion.objects.filter(lobby_id=self.pk).values_list(
                         "numero_cupo", flat=True
@@ -123,7 +186,7 @@ class Lobby(models.Model):
                     n for n in range(1, self.CANTIDAD_CUPOS + 1) if n not in ocupados
                 ]
                 if not libres:
-                    raise ValueError("El lobby no tiene cupos libres")
+                    raise Conflicto("El partido ya está completo.")
                 try:
                     with transaction.atomic():
                         inscripcion = Inscripcion.objects.create(
@@ -138,6 +201,7 @@ class Lobby(models.Model):
                         pk=self.pk, estado=self.Estado.EN_FORMACION
                     ).update(estado=self.Estado.COMPLETO)
                     self.estado = self.Estado.COMPLETO
+                    self._confirmar_reserva()
                     # con el lobby completo ya no hay cupo para pedidos pendientes
                     self._expirar_pendientes()
                 return inscripcion
@@ -163,6 +227,8 @@ class Lobby(models.Model):
             ).update(estado=self.Estado.EN_FORMACION)
             if reabierto:
                 Turno = self._meta.get_field("turno").related_model
+                Lobby.objects.filter(pk=self.pk).update(codigo_reserva=None)
+                self.codigo_reserva = None
                 Turno.objects.filter(
                     pk=self.turno_id, estado=Turno.Estado.CONFIRMADO
                 ).update(estado=Turno.Estado.BLOQUEADO)
@@ -196,6 +262,48 @@ class Lobby(models.Model):
             ).update(estado=Turno.Estado.LIBRE)
             self.estado = self.Estado.CANCELADO
             self._expirar_pendientes()
+            self._notificar_liberacion()
+
+    def _confirmar_reserva(self):
+        """Pasa el turno a CONFIRMADO, emite el código y avisa a jugadores y club."""
+        from social.notificaciones import notificar
+
+        Turno = self._meta.get_field("turno").related_model
+        Turno.objects.filter(pk=self.turno_id, estado=Turno.Estado.BLOQUEADO).update(
+            estado=Turno.Estado.CONFIRMADO
+        )
+        for _ in range(10):
+            codigo = f"{secrets.token_hex(2)}-{secrets.token_hex(2)}".upper()
+            if not Lobby.objects.filter(codigo_reserva=codigo).exists():
+                break
+        Lobby.objects.filter(pk=self.pk).update(codigo_reserva=codigo)
+        self.codigo_reserva = codigo
+        turno = self.turno
+        jugadores = list(
+            self.inscripciones.values_list("jugador__usuario_id", flat=True)
+        )
+        notificar(
+            jugadores,
+            f"Reserva confirmada para el {turno.fecha:%d/%m} a las "
+            f"{turno.hora_inicio:%H:%M} — código {codigo}.",
+        )
+        notificar(
+            [turno.cancha.club.admin_id],
+            f"Cancha {turno.cancha.numero} vendida el {turno.fecha:%d/%m} "
+            f"a las {turno.hora_inicio:%H:%M}.",
+        )
+
+    def _notificar_liberacion(self):
+        from social.notificaciones import notificar
+
+        turno = self.turno
+        usuarios = list(self.inscripciones.values_list("jugador__usuario_id", flat=True))
+        usuarios.append(turno.cancha.club.admin_id)
+        notificar(
+            usuarios,
+            f"Se canceló la partida del {turno.fecha:%d/%m} a las "
+            f"{turno.hora_inicio:%H:%M}; el turno quedó libre.",
+        )
 
     def _expirar_pendientes(self):
         """Vence las invitaciones y solicitudes de acceso que siguen pendientes."""

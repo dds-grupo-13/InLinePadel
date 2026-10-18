@@ -2,6 +2,8 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models.functions import Greatest, Least
 
+from config.exceptions import Conflicto
+
 # Create your models here.
 
 # on_delete: los FK a Jugador son PROTECT (como Inscripcion): conservan el
@@ -107,7 +109,7 @@ class _PedidoLobby:
             pk=self.pk, estado=self.Estado.PENDIENTE
         ).update(estado=nuevo)
         if not cambiado:
-            raise ValueError("El pedido ya no está pendiente")
+            raise Conflicto("El pedido ya no está pendiente.")
         self.estado = nuevo
 
     def aceptar(self):
