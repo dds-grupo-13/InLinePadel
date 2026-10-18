@@ -1,6 +1,5 @@
 from django.contrib import admin
-from . import models
 
-admin.site.register(models.Contacto)
-admin.site.register(models.Invitacion)
-admin.site.register(models.SolicitudAcceso)
+from .models import Contacto, Invitacion, Notificacion, SolicitudAcceso
+
+admin.site.register([Notificacion, Contacto, SolicitudAcceso, Invitacion])

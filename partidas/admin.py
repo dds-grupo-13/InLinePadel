@@ -1,5 +1,5 @@
 from django.contrib import admin
 
-from . import models
+from .models import Inscripcion, Lobby
 
-admin.site.register(models.Lobby)
+admin.site.register([Lobby, Inscripcion])
