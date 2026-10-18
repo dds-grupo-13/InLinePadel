@@ -13,6 +13,9 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from datetime import timedelta
+
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,6 +44,8 @@ INSTALLED_APPS = [
     "partidas",
     "social",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
     "django_filters",
     "django.contrib.admin",
     "django.contrib.auth",
@@ -51,6 +56,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -154,6 +160,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -177,3 +184,20 @@ REST_FRAMEWORK = {
 # Cookies seguras fuera de desarrollo (HTTPS)
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+# CORS: orígenes del frontend, separados por coma (JWT por header, sin cookies)
+CORS_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:4200").split(",")
+    if o.strip()
+]
+CORS_ALLOW_HEADERS = [*default_headers]
+
+# JWT
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
