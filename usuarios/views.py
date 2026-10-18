@@ -1,10 +1,16 @@
-from django.contrib.auth import authenticate, login, logout
-from django.middleware.csrf import get_token
+from django.contrib.auth import authenticate
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.token_blacklist.models import (
+    BlacklistedToken,
+    OutstandingToken,
+)
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Jugador
 from .serializers import (
@@ -31,13 +37,9 @@ class LoginRateThrottle(SimpleRateThrottle):
 
 
 class AuthViewSet(viewsets.ViewSet):
-    """Sesión de django.contrib.auth: login / logout / csrf."""
+    """JWT: login / refresh / logout."""
 
     permission_classes = [AllowAny]
-
-    @action(detail=False, methods=["get"])
-    def csrf(self, request):
-        return Response({"csrfToken": get_token(request)})
 
     @action(detail=False, methods=["post"], throttle_classes=[LoginRateThrottle])
     def login(self, request):
@@ -49,12 +51,36 @@ class AuthViewSet(viewsets.ViewSet):
                 {"detail": "Usuario o contraseña incorrectos."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        login(request, usuario)
-        return Response(_perfil(usuario))
+        refresh = RefreshToken.for_user(usuario)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "usuario": _perfil(usuario),
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def refresh(self, request):
+        serializer = TokenRefreshSerializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+        return Response(serializer.validated_data)
 
     @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
     def logout(self, request):
-        logout(request)
+        try:
+            token = request.data.get("refresh")
+            if not token:
+                raise TokenError
+            RefreshToken(token).blacklist()
+        except TokenError:
+            return Response(
+                {"detail": "Refresh token inválido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -110,7 +136,9 @@ class JugadorViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         instance.dar_de_baja()
-        logout(self.request)
+        # invalida todos los refresh vigentes del usuario dado de baja
+        for token in OutstandingToken.objects.filter(user=instance.usuario):
+            BlacklistedToken.objects.get_or_create(token=token)
 
     @action(detail=False, methods=["get", "patch"])
     def me(self, request):
