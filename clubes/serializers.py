@@ -3,6 +3,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from usuarios.models import Usuario
+from usuarios.serializers import validar_password
 
 from .models import Cancha, Club, Turno, Zona
 
@@ -29,6 +30,16 @@ class ClubSerializer(serializers.ModelSerializer):
         read_only_fields = ["estado"]
         extra_kwargs = {"admin": {"required": False}}
 
+    def validate_admin_username(self, valor):
+        if Usuario.objects.filter(username=valor).exists():
+            raise serializers.ValidationError("Ya existe un usuario con ese nombre.")
+        return valor
+
+    def validate_admin_email(self, valor):
+        if Usuario.objects.filter(email__iexact=valor).exists():
+            raise serializers.ValidationError("Ya existe un/a usuario con este/a email.")
+        return valor
+
     def validate_admin(self, admin):
         if not admin.is_staff:
             raise serializers.ValidationError("El admin del club debe ser staff.")
@@ -47,7 +58,23 @@ class ClubSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Indicá el admin del club o sus credenciales (usuario, email y contraseña)."
                 )
+            else:
+                candidato = Usuario(
+                    username=attrs["admin_username"], email=attrs["admin_email"]
+                )
+                try:
+                    validar_password(attrs["admin_password"], candidato)
+                except serializers.ValidationError as e:
+                    raise serializers.ValidationError({"admin_password": e.detail})
         return attrs
+
+    def to_representation(self, club):
+        datos = super().to_representation(club)
+        # el usuario admin es dato interno: los jugadores no lo necesitan
+        request = self.context.get("request")
+        if request is None or not request.user.is_staff:
+            datos.pop("admin", None)
+        return datos
 
     @transaction.atomic
     def create(self, validated_data):

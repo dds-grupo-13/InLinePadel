@@ -12,6 +12,13 @@ URL = "/api/partidas/lobbies/"
 
 
 class LobbyAPITests(BaseAPITestCase):
+    @staticmethod
+    def habilitar_check_in():
+        ahora = timezone.now()
+        Lobby.objects.update(
+            plazo_limite=ahora - timedelta(hours=2), fecha_check_in=ahora - timedelta(hours=1)
+        )
+
     def crear(self, jugador, turno, **extra):
         self.login(jugador.usuario)
         return self.client.post(URL, {"turno": turno.pk, **extra}, format="json")
@@ -69,9 +76,11 @@ class LobbyAPITests(BaseAPITestCase):
         self.login(self.jugador("j5").usuario)
         self.assertIn(self.client.post(f"{URL}{lobby_id}/unirse/").status_code, (404, 409))
         self.assertEqual(Lobby.objects.get().inscripciones.count(), 4)
-        # el club valida el código
+        # el club valida el código (recién cuando se habilita el check-in)
         self.login(self.admin)
         codigo = Lobby.objects.get().codigo_reserva
+        self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)
+        self.habilitar_check_in()
         self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 200)
         self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)
         t.refresh_from_db()
@@ -126,3 +135,39 @@ class LobbyAPITests(BaseAPITestCase):
         self.assertEqual(Lobby.objects.get().estado, "CANCELADO")
         t.refresh_from_db()
         self.assertEqual(t.estado, "LIBRE")
+
+    def test_no_se_reserva_turno_pasado_ni_cancha_inactiva(self):
+        pasado = self.turno(self.cancha, dias=-3)
+        r = self.crear(self.jugador("a"), pasado)
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertEqual(Turno.objects.get(pk=pasado.pk).estado, "LIBRE")
+
+        inactiva = self.turno(self.cancha, hora=10)
+        self.cancha.activa = False
+        self.cancha.save()
+        self.assertEqual(self.crear(self.jugador("b"), inactiva).status_code, 400)
+        self.assertEqual(Lobby.objects.count(), 0)
+
+    def test_check_in_con_body_invalido_da_400(self):
+        self.login(self.admin)
+        r = self.client.post(f"{URL}check_in/", [1, 2], format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_abandonar_lobby_completo_concede_plazo_minimo(self):
+        lobby_id = self.crear(self.jugador("cap"), self.turno(self.cancha)).data["id"]
+        for n in ("j2", "j3", "j4"):
+            self.login(self.jugador(n).usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        Lobby.objects.update(plazo_limite=timezone.now() - timedelta(hours=1))
+        self.client.post(f"{URL}{lobby_id}/abandonar/")
+        lobby = Lobby.objects.get()
+        self.assertEqual(lobby.estado, "EN_FORMACION")
+        self.assertGreater(lobby.plazo_limite, timezone.now() + timedelta(hours=11))
+        self.assertLessEqual(lobby.plazo_limite, lobby.fecha_check_in)
+        call_command("vencer_lobbies", stdout=StringIO())
+        self.assertEqual(Lobby.objects.get().estado, "EN_FORMACION")
+
+    def test_valueerror_inesperado_no_se_disfraza_de_400(self):
+        from config.exceptions import manejador_excepciones
+
+        self.assertIsNone(manejador_excepciones(ValueError("bug"), {}))

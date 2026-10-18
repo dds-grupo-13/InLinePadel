@@ -1,24 +1,97 @@
+from django.contrib.auth import password_validation, update_session_auth_hash
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
 from .models import Jugador, Usuario
 
 
+def validar_password(password, usuario=None):
+    """Aplica AUTH_PASSWORD_VALIDATORS (DRF no lo hace solo)."""
+    try:
+        password_validation.validate_password(password, usuario)
+    except DjangoValidationError as e:
+        raise serializers.ValidationError(list(e.messages))
+
+
 class UsuarioSerializer(serializers.ModelSerializer):
+    # para cambiar la contraseña de un usuario existente hay que confirmar la actual
+    password_actual = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = Usuario
-        fields = ["id", "username", "email", "first_name", "last_name", "password"]
-        extra_kwargs = {"password": {"write_only": True, "min_length": 8}}
+        fields = [
+            "id", "username", "email", "first_name", "last_name",
+            "password", "password_actual",
+        ]
+        extra_kwargs = {
+            "password": {"write_only": True, "min_length": 8},
+            # la unicidad se valida a mano (ver _validar_unico): el UniqueValidator
+            # de DRF no excluye al usuario propio cuando el serializer va anidado
+            "username": {"validators": [UnicodeUsernameValidator()]},
+            "email": {"validators": []},
+        }
+
+    def _actual(self):
+        """El usuario que se está editando, también cuando el serializer va anidado."""
+        if self.instance is not None:
+            return self.instance
+        return getattr(getattr(self.parent, "instance", None), "usuario", None)
+
+    def _validar_unico(self, campo, valor, mensaje, lookup="exact"):
+        existentes = Usuario.objects.filter(**{f"{campo}__{lookup}": valor})
+        actual = self._actual()
+        if actual is not None:
+            existentes = existentes.exclude(pk=actual.pk)
+        if existentes.exists():
+            raise serializers.ValidationError(mensaje)
+        return valor
+
+    def validate_username(self, valor):
+        return self._validar_unico("username", valor, "Ya existe un usuario con ese nombre.")
+
+    def validate_email(self, valor):
+        return self._validar_unico(
+            "email", valor, "Ya existe un/a usuario con este/a email.", lookup="iexact"
+        )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        actual = self._actual()
+        password = attrs.get("password")
+        if password is None:
+            return attrs
+        if actual is not None:
+            if not actual.check_password(attrs.get("password_actual", "")):
+                raise serializers.ValidationError(
+                    {"password_actual": "Ingresá tu contraseña actual para cambiarla."}
+                )
+        candidato = actual or Usuario(
+            **{c: attrs[c] for c in ("username", "email", "first_name", "last_name") if c in attrs}
+        )
+        try:
+            validar_password(password, candidato)
+        except serializers.ValidationError as e:
+            raise serializers.ValidationError({"password": e.detail})
+        return attrs
 
     def create(self, validated_data):
+        validated_data.pop("password_actual", None)
         return Usuario.objects.create_user(**validated_data)
 
     def update(self, instance, validated_data):
+        validated_data.pop("password_actual", None)
         password = validated_data.pop("password", None)
         instance = super().update(instance, validated_data)
         if password:
             instance.set_password(password)
             instance.save(update_fields=["password"])
+            # set_password cambia el hash de la sesión: sin esto el usuario
+            # quedaría deslogueado en la request siguiente
+            request = self.context.get("request")
+            if request is not None and request.user.pk == instance.pk:
+                update_session_auth_hash(request, instance)
         return instance
 
 
@@ -64,7 +137,7 @@ class RegistroJugadorSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         datos = validated_data.pop("usuario", None)
         if datos:
-            UsuarioSerializer(partial=True).update(instance.usuario, datos)
+            UsuarioSerializer(partial=True, context=self.context).update(instance.usuario, datos)
         return super().update(instance, validated_data)
 
 

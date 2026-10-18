@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
-from config.exceptions import Conflicto
+from config.exceptions import Conflicto, ErrorDominio
 
 # Create your models here.
 
@@ -15,6 +15,10 @@ class Lobby(models.Model):
     CANTIDAD_CUPOS = 4
     MAX_LOBBIES_EN_FORMACION = 2
     HORAS_PLAZO = 48
+    # plazo mínimo que se concede al reabrirse un lobby completo por un abandono
+    HORAS_PLAZO_REAPERTURA = 12
+    # cuánto antes de fecha_check_in el club puede validar el código de reserva
+    MINUTOS_ANTICIPO_CHECK_IN = 15
 
     class Estado(models.TextChoices):
         EN_FORMACION = "EN_FORMACION", "En formación"
@@ -123,22 +127,31 @@ class Lobby(models.Model):
             min(timezone.now() + timedelta(hours=cls.HORAS_PLAZO), turno.inicio),
         )
         if turno.cancha.club.estado != "ACTIVO":
-            raise ValueError("El club no está habilitado para recibir reservas.")
-        en_formacion = cls.objects.filter(
-            capitan=capitan, estado=cls.Estado.EN_FORMACION
-        ).count()
-        if en_formacion >= cls.MAX_LOBBIES_EN_FORMACION:
-            raise ValueError(
-                f"Ya sos capitán de {cls.MAX_LOBBIES_EN_FORMACION} partidas en formación. "
-                "Esperá a que se completen o cancelá una."
-            )
-        superpuesto = cls.conflicto_horario(capitan, turno)
-        if superpuesto:
-            raise ValueError(
-                "Ya participás de otra partida en ese horario "
-                f"({superpuesto.turno.inicio:%d/%m %H:%M})."
-            )
+            raise ErrorDominio("El club no está habilitado para recibir reservas.")
+        if not turno.cancha.activa:
+            raise ErrorDominio("La cancha no está habilitada para recibir reservas.")
+        if turno.inicio <= timezone.now():
+            raise ErrorDominio("El turno ya comenzó o ya pasó.")
         with transaction.atomic():
+            # serializa las altas del mismo capitán: sin esto dos pedidos simultáneos
+            # podrían saltearse el tope de lobbies y el chequeo de solape
+            # (no-op en SQLite, que serializa escrituras)
+            Jugador = cls._meta.get_field("capitan").related_model
+            Jugador.objects.select_for_update().filter(pk=capitan.pk).first()
+            en_formacion = cls.objects.filter(
+                capitan=capitan, estado=cls.Estado.EN_FORMACION
+            ).count()
+            if en_formacion >= cls.MAX_LOBBIES_EN_FORMACION:
+                raise ErrorDominio(
+                    f"Ya sos capitán de {cls.MAX_LOBBIES_EN_FORMACION} partidas en formación. "
+                    "Esperá a que se completen o cancelá una."
+                )
+            superpuesto = cls.conflicto_horario(capitan, turno)
+            if superpuesto:
+                raise ErrorDominio(
+                    "Ya participás de otra partida en ese horario "
+                    f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                )
             bloqueado = Turno.objects.filter(
                 pk=turno.pk, estado=Turno.Estado.LIBRE
             ).update(estado=Turno.Estado.BLOQUEADO)
@@ -161,19 +174,22 @@ class Lobby(models.Model):
             return lobby
 
     def inscribir(self, jugador):
-        superpuesto = Lobby.conflicto_horario(
-            jugador, self.turno, excluir_lobby=self.pk
-        )
-        if superpuesto:
-            raise Conflicto(
-                "Ya participás de otra partida en ese horario "
-                f"({superpuesto.turno.inicio:%d/%m %H:%M})."
-            )
         # Los unique constraints (lobby, cupo) y (lobby, jugador) garantizan la
         # consistencia ante inscripciones concurrentes; si dos toman el mismo
         # cupo, el perdedor reintenta con el siguiente libre.
         for _ in range(self.CANTIDAD_CUPOS):
             with transaction.atomic():
+                # serializa las inscripciones del mismo jugador para que el
+                # chequeo de solape sea confiable (no-op en SQLite)
+                type(jugador).objects.select_for_update().filter(pk=jugador.pk).first()
+                superpuesto = Lobby.conflicto_horario(
+                    jugador, self.turno, excluir_lobby=self.pk
+                )
+                if superpuesto:
+                    raise Conflicto(
+                        "Ya participás de otra partida en ese horario "
+                        f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                    )
                 estado = Lobby.objects.values_list("estado", flat=True).get(pk=self.pk)
                 if estado != self.Estado.EN_FORMACION:
                     raise Conflicto("La partida ya no está abierta a nuevos jugadores.")
@@ -194,7 +210,7 @@ class Lobby(models.Model):
                         )
                 except IntegrityError:
                     if Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).exists():
-                        raise ValueError("El jugador ya está inscripto en este lobby")
+                        raise ErrorDominio("El jugador ya está inscripto en este lobby")
                     continue  # cupo tomado por otro: reintentar
                 if len(ocupados) + 1 >= self.CANTIDAD_CUPOS:
                     Lobby.objects.filter(
@@ -205,7 +221,7 @@ class Lobby(models.Model):
                     # con el lobby completo ya no hay cupo para pedidos pendientes
                     self._expirar_pendientes()
                 return inscripcion
-        raise ValueError("No se pudo asignar un cupo, reintentá")
+        raise ErrorDominio("No se pudo asignar un cupo, reintentá")
 
     def abandonar(self, jugador):
         """Libera el cupo del jugador. Si era el capitán, pasa al primero en
@@ -213,12 +229,12 @@ class Lobby(models.Model):
         with transaction.atomic():
             lobby = Lobby.objects.get(pk=self.pk)
             if lobby.estado not in (self.Estado.EN_FORMACION, self.Estado.COMPLETO):
-                raise ValueError(f"No se puede abandonar un lobby {lobby.estado}")
+                raise ErrorDominio(f"No se puede abandonar un lobby {lobby.estado}")
             borradas, _ = Inscripcion.objects.filter(
                 lobby_id=self.pk, jugador=jugador
             ).delete()
             if not borradas:
-                raise ValueError("El jugador no está inscripto en este lobby")
+                raise ErrorDominio("El jugador no está inscripto en este lobby")
 
             # al liberarse un cupo vuelve a estar abierto; si el turno ya estaba
             # confirmado (via API) deja de estarlo hasta que se complete de nuevo
@@ -227,7 +243,16 @@ class Lobby(models.Model):
             ).update(estado=self.Estado.EN_FORMACION)
             if reabierto:
                 Turno = self._meta.get_field("turno").related_model
-                Lobby.objects.filter(pk=self.pk).update(codigo_reserva=None)
+                # el plazo original pudo haber vencido mientras estaba completo: se
+                # concede un mínimo (sin pasar del check-in) para que pueda volver a llenarse
+                plazo = max(
+                    lobby.plazo_limite,
+                    min(
+                        timezone.now() + timedelta(hours=self.HORAS_PLAZO_REAPERTURA),
+                        lobby.fecha_check_in,
+                    ),
+                )
+                Lobby.objects.filter(pk=self.pk).update(codigo_reserva=None, plazo_limite=plazo)
                 self.codigo_reserva = None
                 Turno.objects.filter(
                     pk=self.turno_id, estado=Turno.Estado.CONFIRMADO
@@ -255,7 +280,7 @@ class Lobby(models.Model):
                 estado__in=(self.Estado.EN_FORMACION, self.Estado.COMPLETO),
             ).update(estado=self.Estado.CANCELADO)
             if not cancelado:
-                raise ValueError("Solo se puede cancelar un lobby en formación o completo")
+                raise ErrorDominio("Solo se puede cancelar un lobby en formación o completo")
             Turno.objects.filter(
                 pk=self.turno_id,
                 estado__in=(Turno.Estado.BLOQUEADO, Turno.Estado.CONFIRMADO),

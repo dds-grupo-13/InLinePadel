@@ -63,3 +63,37 @@ class ClubesAPITests(BaseAPITestCase):
         self.client.post(f"/api/clubes/clubes/{self.club.pk}/suspender/")
         self.login(self.jugador("q").usuario)
         self.assertEqual(self.client.get("/api/clubes/turnos/").data["count"], 0)
+
+    def test_crear_club_valida_credenciales_del_admin(self):
+        self.login(self.superadmin)
+        datos = {
+            "denominacion": "Club C", "direccion": "Calle 3", "zona": self.zona.pk,
+            "admin_username": "adminc", "admin_email": "c@x.com", "admin_password": "clave12345",
+        }
+        url = "/api/clubes/clubes/"
+        r = self.client.post(url, {**datos, "admin_username": "admin_club"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("admin_username", r.data)
+        r = self.client.post(url, {**datos, "admin_email": "AC@x.com"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("admin_email", r.data)
+        r = self.client.post(url, {**datos, "admin_password": "12345678"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("admin_password", r.data)
+
+    def test_jugador_no_ve_el_admin_del_club(self):
+        self.login(self.jugador("p").usuario)
+        r = self.client.get("/api/clubes/clubes/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("admin", r.data["results"][0])
+        self.login(self.superadmin)
+        self.assertIn("admin", self.client.get("/api/clubes/clubes/").data["results"][0])
+
+    def test_crear_masivo_tiene_tope(self):
+        self.login(self.admin)
+        base = {"cancha": self.cancha.pk, "fecha": "2030-01-01", "precio": "100", "hora_inicio": "10:00"}
+        r = self.client.post(
+            "/api/clubes/turnos/crear_masivo/", [base] * 501, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Turno.objects.count(), 0)

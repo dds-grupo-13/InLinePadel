@@ -1,9 +1,11 @@
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -146,6 +148,8 @@ class LobbyViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"])
     def check_in(self, request):
         """El club valida el código de reserva y registra el check-in."""
+        if not isinstance(request.data, dict):
+            raise ValidationError({"codigo_reserva": "Este campo es obligatorio."})
         codigo = str(request.data.get("codigo_reserva", "")).strip().upper()
         lobbies = Lobby.objects.select_related("turno__cancha__club").filter(
             codigo_reserva=codigo
@@ -157,6 +161,14 @@ class LobbyViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "El código de reserva no es válido para este club."},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+        habilitado_desde = lobby.fecha_check_in - timedelta(
+            minutes=Lobby.MINUTOS_ANTICIPO_CHECK_IN
+        )
+        if timezone.now() < habilitado_desde:
+            hora = timezone.localtime(habilitado_desde)
+            raise Conflicto(
+                f"El check-in se habilita el {hora:%d/%m} a las {hora:%H:%M}."
             )
         with transaction.atomic():
             pasado = Lobby.objects.filter(pk=lobby.pk, estado=Lobby.Estado.COMPLETO).update(

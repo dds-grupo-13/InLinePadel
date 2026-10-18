@@ -109,8 +109,7 @@ class JugadorViewSet(viewsets.ModelViewSet):
             self.permission_denied(request, message="No podés modificar el perfil de otro jugador.")
 
     def perform_destroy(self, instance):
-        instance.usuario.is_active = False
-        instance.usuario.save(update_fields=["is_active"])
+        instance.dar_de_baja()
         logout(self.request)
 
     @action(detail=False, methods=["get", "patch"])
@@ -119,7 +118,9 @@ class JugadorViewSet(viewsets.ModelViewSet):
         if jugador is None:
             return Response(_perfil(request.user))
         if request.method == "PATCH":
-            serializer = RegistroJugadorSerializer(jugador, data=request.data, partial=True)
+            serializer = RegistroJugadorSerializer(
+                jugador, data=request.data, partial=True, context={"request": request}
+            )
             serializer.is_valid(raise_exception=True)
             serializer.save()
         return Response(_perfil(request.user))

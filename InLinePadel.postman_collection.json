@@ -276,7 +276,43 @@
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "Para cambiar username/email se puede reenviar el mismo valor sin error. Para cambiar la contraseña usá «Cambiar mi contraseña»."
+          }
+        },
+        {
+          "name": "Cambiar mi contraseña",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "me",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": {\n    \"password_actual\": \"{{password}}\",\n    \"password\": \"nuevaclave987\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Exige `password_actual` además de la nueva `password`. La nueva debe pasar los validadores de Django (no muy común, no solo numérica, no parecida al usuario, mínimo 8). La sesión sigue activa después del cambio."
           }
         },
         {
@@ -331,7 +367,7 @@
                 ""
               ]
             },
-            "description": "Desactiva el usuario y cierra sesión."
+            "description": "Desactiva el usuario y cierra sesión. Antes sale de las partidas vigentes (la capitanía pasa al siguiente inscripto o la partida se cancela) y vence sus solicitudes/invitaciones pendientes."
           }
         }
       ]
@@ -546,7 +582,8 @@
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "El username y el email del admin no pueden existir ya, y la contraseña debe pasar los validadores de Django. Los jugadores no reciben el campo `admin` al listar clubes."
               },
               "event": [
                 {
@@ -1103,7 +1140,8 @@
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Máximo 500 turnos por pedido (400 si se supera). Es todo o nada: si uno se solapa no se crea ninguno."
               }
             },
             {
@@ -1333,7 +1371,8 @@
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "400 si el turno ya empezó, la cancha está inactiva o el club no está activo. 409 si el turno ya fue tomado."
               },
               "event": [
                 {
@@ -1511,13 +1550,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"codigo_reserva\": \"ABC123\"\n}",
+                  "raw": "{\n  \"codigo_reserva\": \"{{codigo_reserva}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Valida el código de reserva (formato XXXX-XXXX). Solo se habilita desde 15 minutos antes del check-in de la partida: antes responde 409. El body debe ser un objeto JSON."
               }
             }
           ]
@@ -2182,6 +2222,10 @@
     {
       "key": "notificacion_id",
       "value": "1"
+    },
+    {
+      "key": "codigo_reserva",
+      "value": "ABCD-1234"
     }
   ]
 }

@@ -4,6 +4,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from config.exceptions import Conflicto
@@ -123,6 +124,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
     serializer_class = TurnoSerializer
     filterset_class = TurnoFilter
     EDITABLES = (Turno.Estado.LIBRE, Turno.Estado.NO_DISPONIBLE)
+    MAX_TURNOS_MASIVO = 500
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
@@ -184,6 +186,10 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def crear_masivo(self, request):
+        if isinstance(request.data, list) and len(request.data) > self.MAX_TURNOS_MASIVO:
+            raise ValidationError(
+                f"Se pueden crear hasta {self.MAX_TURNOS_MASIVO} turnos por pedido."
+            )
         serializer = self.get_serializer(data=request.data, many=True)
         serializer.is_valid(raise_exception=True)
         turnos = [Turno(**datos) for datos in serializer.validated_data]
