@@ -163,11 +163,11 @@ class InvitacionViewSet(
 
 
 class SolicitudAccesoViewSet(
-    mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     _JugadorViewSet,
 ):
+    """Solo lectura: las partidas privadas se acceden únicamente por invitación."""
     serializer_class = SolicitudAccesoSerializer
     filterset_fields = ["lobby", "estado"]
 
@@ -176,13 +176,6 @@ class SolicitudAccesoViewSet(
         return SolicitudAcceso.objects.select_related(
             "jugador__usuario", "lobby"
         ).filter(Q(jugador=self.jugador) | Q(lobby__capitan=self.jugador))
-
-    def perform_create(self, serializer):
-        solicitud = serializer.save(jugador=self.jugador)
-        notificar(
-            [solicitud.lobby.capitan.usuario_id],
-            f"{self.request.user.username} pidió unirse a tu partida privada.",
-        )
 
     def _como_capitan(self):
         solicitud = self.get_object()

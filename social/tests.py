@@ -65,18 +65,22 @@ class SocialAPITests(BaseAPITestCase):
         self.login(amigo.usuario)
         self.assertEqual(self.client.post(f"/api/social/invitaciones/{inv}/aceptar/").status_code, 409)
 
-    def test_solicitud_privada_la_acepta_el_capitan(self):
+    def test_privada_solo_por_invitacion_no_se_puede_solicitar(self):
         cap, visita = self.jugador("cap"), self.jugador("visita")
         self.login(cap.usuario)
         lobby_id = self.client.post(
             LOBBIES, {"turno": self.turno(self.cancha).pk, "privacidad": "PRIVADO"}, format="json"
         ).data["id"]
+
         self.login(visita.usuario)
-        sol = self.client.post(f"{LOBBIES}{lobby_id}/unirse/").data["id"]
-        self.assertEqual(self.client.post(f"/api/social/solicitudes/{sol}/aceptar/").status_code, 403)
-        self.login(cap.usuario)
-        self.assertEqual(self.client.post(f"/api/social/solicitudes/{sol}/aceptar/").status_code, 200)
-        self.assertEqual(Lobby.objects.get().inscripciones.count(), 2)
+        # la privada no aparece ni se puede unir sin invitación
+        self.assertEqual(self.client.post(f"{LOBBIES}{lobby_id}/unirse/").status_code, 404)
+        # y el endpoint de solicitudes ya no permite crearlas
+        self.assertEqual(
+            self.client.post("/api/social/solicitudes/", {"lobby": lobby_id}).status_code,
+            405,
+        )
+        self.assertEqual(Lobby.objects.get().inscripciones.count(), 1)
 
     def test_notificaciones_propias_y_marcar_leidas(self):
         a, b = self.jugador("a"), self.jugador("b")

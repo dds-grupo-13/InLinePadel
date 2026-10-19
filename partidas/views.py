@@ -12,9 +12,8 @@ from rest_framework.response import Response
 from clubes.models import Club, Turno
 from config.exceptions import Conflicto
 from config.permissions import EsAdminClub, EsJugador
-from social.models import Invitacion, SolicitudAcceso
+from social.models import Invitacion
 from social.notificaciones import notificar
-from social.serializers import SolicitudAccesoSerializer
 
 from .filters import LobbyFilter
 from .models import Inscripcion, Lobby
@@ -34,20 +33,36 @@ class LobbyViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         jugador = self.request.user.jugador
         propios = Inscripcion.objects.filter(lobby=OuterRef("pk"), jugador=jugador)
+        invitado = Invitacion.objects.filter(
+            lobby=OuterRef("pk"),
+            receptor=jugador,
+            estado=Invitacion.Estado.PENDIENTE,
+        )
         return (
             Lobby.objects.select_related(
                 "turno", "turno__cancha", "turno__cancha__club", "capitan__usuario"
             )
             .prefetch_related("inscripciones__jugador__usuario")
-            .annotate(ocupados=Count("inscripciones", distinct=True), es_mio=Exists(propios))
-            # oferta vigente + las partidas en las que participo (cualquier estado)
+            .annotate(
+                ocupados=Count("inscripciones", distinct=True),
+                es_mio=Exists(propios),
+                es_invitado=Exists(invitado),
+            )
+            # propias (cualquier estado) + oferta vigente:
+            # públicas, o privadas solo si el jugador fue invitado
             .filter(
-                Q(
-                    estado=Lobby.Estado.EN_FORMACION,
-                    turno__inicio__gt=timezone.now(),
-                    turno__cancha__club__estado=Club.Estado.ACTIVO,
+                Q(es_mio=True)
+                | (
+                    Q(
+                        estado=Lobby.Estado.EN_FORMACION,
+                        turno__inicio__gt=timezone.now(),
+                        turno__cancha__club__estado=Club.Estado.ACTIVO,
+                    )
+                    & (
+                        Q(privacidad=Lobby.Privacidad.PUBLICO)
+                        | Q(es_invitado=True)
+                    )
                 )
-                | Q(es_mio=True)
             )
             .order_by("turno__inicio", "pk")
         )
@@ -103,7 +118,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
             receptor=jugador, estado=Invitacion.Estado.PENDIENTE
         ).first()
         if lobby.privacidad == Lobby.Privacidad.PRIVADO and invitacion is None:
-            return self._solicitar_acceso(lobby, jugador)
+            raise PermissionDenied("Esta partida es solo por invitación.")
 
         with transaction.atomic():
             if invitacion is not None:
@@ -117,22 +132,6 @@ class LobbyViewSet(viewsets.ModelViewSet):
         ]
         notificar(otros, f"{request.user.username} se unió a tu partida.")
         return self._responder(lobby)
-
-    def _solicitar_acceso(self, lobby, jugador):
-        superpuesto = Lobby.conflicto_horario(jugador, lobby.turno, excluir_lobby=lobby.pk)
-        if superpuesto:
-            raise Conflicto(
-                "Ya participás de otra partida en ese horario "
-                f"({superpuesto.turno.inicio:%d/%m %H:%M})."
-            )
-        solicitud = SolicitudAcceso.objects.create(lobby=lobby, jugador=jugador)
-        notificar(
-            [lobby.capitan.usuario_id],
-            f"{jugador.usuario.username} pidió unirse a tu partida privada.",
-        )
-        return Response(
-            SolicitudAccesoSerializer(solicitud).data, status=status.HTTP_202_ACCEPTED
-        )
 
     @action(detail=True, methods=["post"])
     def abandonar(self, request, pk=None):

@@ -31,14 +31,16 @@ class LobbySerializer(serializers.ModelSerializer):
     estado_reserva = serializers.SerializerMethodField()
     mensaje_reserva = serializers.SerializerMethodField()
     es_capitan = serializers.SerializerMethodField()
+    fui_invitado = serializers.SerializerMethodField()
 
     class Meta:
         model = Lobby
         fields = [
             "id", "privacidad", "estado", "fecha_creacion", "plazo_limite",
-            "fecha_check_in", "capitan", "es_capitan", "turno", "turno_detalle",
-            "inscripciones", "cupos_ocupados", "cupos_libres", "precio_total",
-            "precio_por_jugador", "estado_reserva", "mensaje_reserva", "codigo_reserva",
+            "fecha_check_in", "capitan", "es_capitan", "fui_invitado", "turno",
+            "turno_detalle", "inscripciones", "cupos_ocupados", "cupos_libres",
+            "precio_total", "precio_por_jugador", "estado_reserva",
+            "mensaje_reserva", "codigo_reserva",
         ]
         read_only_fields = [
             "estado", "fecha_creacion", "plazo_limite", "fecha_check_in",
@@ -70,6 +72,10 @@ class LobbySerializer(serializers.ModelSerializer):
     def get_es_capitan(self, lobby):
         jugador = self._jugador()
         return bool(jugador) and lobby.capitan_id == jugador.pk
+
+    def get_fui_invitado(self, lobby):
+        # lo anota LobbyViewSet.get_queryset; si falta, no hay invitación pendiente
+        return bool(getattr(lobby, "es_invitado", False))
 
     def get_estado_reserva(self, lobby):
         if lobby.estado == Lobby.Estado.CANCELADO:

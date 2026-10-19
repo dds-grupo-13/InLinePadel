@@ -7,6 +7,7 @@ from django.utils import timezone
 from clubes.models import Turno
 from config.test_utils import BaseAPITestCase
 from partidas.models import Lobby
+from social.models import Invitacion, SolicitudAcceso
 
 URL = "/api/partidas/lobbies/"
 
@@ -96,13 +97,35 @@ class LobbyAPITests(BaseAPITestCase):
         self.login(self.otro_admin)
         self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 404)
 
-    def test_lobby_privado_genera_solicitud(self):
+    def test_lobby_privado_solo_por_invitacion(self):
         t = self.turno(self.cancha)
         lobby_id = self.crear(self.jugador("cap"), t, privacidad="PRIVADO").data["id"]
         self.login(self.jugador("visita").usuario)
+
+        listado = self.client.get(URL)
+        ids = [lobby["id"] for lobby in listado.data["results"]]
+        self.assertNotIn(lobby_id, ids)
+        self.assertEqual(self.client.post(f"{URL}{lobby_id}/unirse/").status_code, 404)
+        self.assertFalse(SolicitudAcceso.objects.exists())
+
+    def test_lobby_privado_invitado_aparece_y_se_une(self):
+        cap = self.jugador("cap")
+        visita = self.jugador("visita")
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(cap, t, privacidad="PRIVADO").data["id"]
+        lobby = Lobby.objects.get(pk=lobby_id)
+        invitacion = Invitacion.objects.create(lobby=lobby, emisor=cap, receptor=visita)
+
+        self.login(visita.usuario)
+        listado = self.client.get(URL)
+        fila = next(lobby for lobby in listado.data["results"] if lobby["id"] == lobby_id)
+        self.assertTrue(fila["fui_invitado"])
+
         r = self.client.post(f"{URL}{lobby_id}/unirse/")
-        self.assertEqual(r.status_code, 202, r.data)
-        self.assertEqual(Lobby.objects.get().inscripciones.count(), 1)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["cupos_ocupados"], 2)
+        invitacion.refresh_from_db()
+        self.assertEqual(invitacion.estado, "ACEPTADA")
 
     def test_solo_capitan_cancela_y_libera_turno(self):
         t = self.turno(self.cancha)
