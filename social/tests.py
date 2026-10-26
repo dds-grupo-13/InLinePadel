@@ -20,7 +20,6 @@ class SocialAPITests(BaseAPITestCase):
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(self.client.post("/api/social/contactos/", {"contacto": b.pk}).status_code, 400)
         self.assertEqual(self.client.post("/api/social/contactos/", {"contacto": a.pk}).status_code, 400)
-        # el emisor no puede aceptar su propia solicitud
         self.assertEqual(self.client.post(f"/api/social/contactos/{r.data['id']}/aceptar/").status_code, 403)
         self.login(b.usuario)
         self.assertEqual(self.client.post(f"/api/social/contactos/{r.data['id']}/aceptar/").data["estado"], "ACEPTADO")
@@ -60,7 +59,6 @@ class SocialAPITests(BaseAPITestCase):
         for n in ("j2", "j3", "j4"):
             self.login(self.jugador(n).usuario)
             self.client.post(f"{LOBBIES}{lobby_id}/unirse/")
-        # al completarse el lobby las pendientes vencen solas
         self.assertEqual(Invitacion.objects.get(pk=inv).estado, "EXPIRADA")
         self.login(amigo.usuario)
         self.assertEqual(self.client.post(f"/api/social/invitaciones/{inv}/aceptar/").status_code, 409)
@@ -73,9 +71,7 @@ class SocialAPITests(BaseAPITestCase):
         ).data["id"]
 
         self.login(visita.usuario)
-        # la privada no aparece ni se puede unir sin invitación
         self.assertEqual(self.client.post(f"{LOBBIES}{lobby_id}/unirse/").status_code, 404)
-        # y el endpoint de solicitudes ya no permite crearlas
         self.assertEqual(
             self.client.post("/api/social/solicitudes/", {"lobby": lobby_id}).status_code,
             405,

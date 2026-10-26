@@ -15,7 +15,6 @@ class ZonaSerializer(serializers.ModelSerializer):
 
 
 class ClubSerializer(serializers.ModelSerializer):
-    # credenciales del admin del club, alternativa a pasar un `admin` existente
     admin_username = serializers.CharField(write_only=True, required=False)
     admin_email = serializers.EmailField(write_only=True, required=False)
     admin_password = serializers.CharField(write_only=True, required=False, min_length=8)
@@ -26,7 +25,6 @@ class ClubSerializer(serializers.ModelSerializer):
             "id", "denominacion", "direccion", "estado", "zona", "admin",
             "admin_username", "admin_email", "admin_password",
         ]
-        # el estado cambia solo con las acciones suspender/reactivar/dar_de_baja
         read_only_fields = ["estado"]
         extra_kwargs = {"admin": {"required": False}}
 
@@ -70,7 +68,6 @@ class ClubSerializer(serializers.ModelSerializer):
 
     def to_representation(self, club):
         datos = super().to_representation(club)
-        # el usuario admin es dato interno: los jugadores no lo necesitan
         request = self.context.get("request")
         if request is None or not request.user.is_staff:
             datos.pop("admin", None)
@@ -96,7 +93,6 @@ class ClubSerializer(serializers.ModelSerializer):
 
 
 def _validar_club_propio(request, club):
-    """Un admin de club solo opera sobre su propio club (RNF05)."""
     user = request.user
     if not user.is_superuser and club.admin_id != user.pk:
         raise serializers.ValidationError("Solo podés operar sobre tu propio club.")
@@ -146,8 +142,6 @@ class TurnoSerializer(serializers.ModelSerializer):
 
 
 class TurnoOcupacionSerializer(serializers.ModelSerializer):
-    """Vista del club: ocupación de un turno con su lobby y estado de reserva."""
-
     cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
     lobby = serializers.SerializerMethodField()
 
@@ -156,7 +150,6 @@ class TurnoOcupacionSerializer(serializers.ModelSerializer):
         fields = ["id", "fecha", "hora_inicio", "cancha", "cancha_numero", "estado", "lobby"]
 
     def get_lobby(self, turno):
-        # usa el prefetch de lobbies e inscripciones (sin queries por fila)
         lobby = next((l for l in turno.lobbies.all() if l.estado != "CANCELADO"), None)
         if lobby is None:
             return None

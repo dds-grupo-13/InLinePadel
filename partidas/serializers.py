@@ -74,7 +74,6 @@ class LobbySerializer(serializers.ModelSerializer):
         return bool(jugador) and lobby.capitan_id == jugador.pk
 
     def get_fui_invitado(self, lobby):
-        # lo anota LobbyViewSet.get_queryset; si falta, no hay invitación pendiente
         return bool(getattr(lobby, "es_invitado", False))
 
     def get_estado_reserva(self, lobby):
@@ -100,7 +99,6 @@ class LobbySerializer(serializers.ModelSerializer):
 
     def to_representation(self, lobby):
         datos = super().to_representation(lobby)
-        # el código de reserva es solo de los inscriptos
         if not self._inscripto(lobby):
             datos["codigo_reserva"] = None
         return datos

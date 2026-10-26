@@ -8,7 +8,6 @@ from .models import Jugador, Usuario
 
 
 def validar_password(password, usuario=None):
-    """Aplica AUTH_PASSWORD_VALIDATORS (DRF no lo hace solo)."""
     try:
         password_validation.validate_password(password, usuario)
     except DjangoValidationError as e:
@@ -16,7 +15,6 @@ def validar_password(password, usuario=None):
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
-    # para cambiar la contraseña de un usuario existente hay que confirmar la actual
     password_actual = serializers.CharField(write_only=True, required=False)
 
     class Meta:
@@ -27,14 +25,11 @@ class UsuarioSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "password": {"write_only": True, "min_length": 8},
-            # la unicidad se valida a mano (ver _validar_unico): el UniqueValidator
-            # de DRF no excluye al usuario propio cuando el serializer va anidado
             "username": {"validators": [UnicodeUsernameValidator()]},
             "email": {"validators": []},
         }
 
     def _actual(self):
-        """El usuario que se está editando, también cuando el serializer va anidado."""
         if self.instance is not None:
             return self.instance
         return getattr(getattr(self.parent, "instance", None), "usuario", None)
@@ -87,8 +82,6 @@ class UsuarioSerializer(serializers.ModelSerializer):
         if password:
             instance.set_password(password)
             instance.save(update_fields=["password"])
-            # set_password cambia el hash de la sesión: sin esto el usuario
-            # quedaría deslogueado en la request siguiente
             request = self.context.get("request")
             if request is not None and request.user.pk == instance.pk:
                 update_session_auth_hash(request, instance)
@@ -104,8 +97,6 @@ class JugadorSerializer(serializers.ModelSerializer):
 
 
 class JugadorPublicoSerializer(serializers.ModelSerializer):
-    """Datos mínimos de un jugador para terceros (buscador, inscriptos)."""
-
     id = serializers.IntegerField(source="pk", read_only=True)
     username = serializers.CharField(source="usuario.username", read_only=True)
     nombre = serializers.SerializerMethodField()
@@ -119,8 +110,6 @@ class JugadorPublicoSerializer(serializers.ModelSerializer):
 
 
 class RegistroJugadorSerializer(serializers.ModelSerializer):
-    """Alta de jugador: crea el Usuario y su perfil en una transacción."""
-
     usuario = UsuarioSerializer()
 
     class Meta:

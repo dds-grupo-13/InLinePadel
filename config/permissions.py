@@ -28,8 +28,6 @@ class EsJugador(BasePermission):
 
 
 class SoloLecturaOAdminSistema(BasePermission):
-    """Lectura para cualquiera (autenticado o no); escritura solo admin del sistema."""
-
     message = "Solo el administrador del sistema puede modificar este recurso."
 
     def has_permission(self, request, view):

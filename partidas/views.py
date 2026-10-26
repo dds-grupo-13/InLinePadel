@@ -48,8 +48,6 @@ class LobbyViewSet(viewsets.ModelViewSet):
                 es_mio=Exists(propios),
                 es_invitado=Exists(invitado),
             )
-            # propias (cualquier estado) + oferta vigente:
-            # públicas, o privadas solo si el jugador fue invitado
             .filter(
                 Q(es_mio=True)
                 | (
@@ -146,7 +144,6 @@ class LobbyViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def check_in(self, request):
-        """El club valida el código de reserva y registra el check-in."""
         if not isinstance(request.data, dict):
             raise ValidationError({"codigo_reserva": "Este campo es obligatorio."})
         codigo = str(request.data.get("codigo_reserva", "")).strip().upper()

@@ -1,22 +1,3 @@
-"""Carga datos demo idempotentes para la presentación final de InLine Padel.
-
-Uso:
-    python manage.py seed_demo_data
-
-Se puede ejecutar varias veces: no duplica usuarios, clubes, canchas, turnos
-ni lobbies. Deja códigos de reserva listos para probar el check-in.
-
-Credenciales creadas:
-    Superusuario:   superAdmin@inLinePadel.com   / admin
-    Admin clubes:   admin.norte@inlinepadel.com  / clubadmin123
-                    admin.sur@inlinepadel.com    / clubadmin123
-    Jugadores:      demo@inlinepadel.com         / demo1234
-                    carlos@inlinepadel.com       / demo1234
-                    lucia@inlinepadel.com        / demo1234
-                    nico@inlinepadel.com         / demo1234
-                    sofia@inlinepadel.com        / demo1234
-"""
-
 from datetime import time, timedelta
 
 from django.core.management.base import BaseCommand
@@ -33,7 +14,6 @@ PASSWORD_SUPER = "admin"
 PASSWORD_ADMIN = "clubadmin123"
 PASSWORD_JUGADOR = "demo1234"
 
-# Códigos fijos para que el demo se pueda repetir sin resemillar la base.
 CODIGO_CHECK_IN = "CHK-DEMO"
 CODIGO_JUGADO = "PLAY-001"
 
@@ -50,11 +30,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write("Generando datos demo...")
 
-        # Los lobbies demo de corridas anteriores ya vencieron: se cancelan para
-        # liberar cupos de capitán y turnos antes de generar los nuevos.
         self._limpiar_lobbies_vencidos()
 
-        # ---------------------------------------------------------------- users
         superadmin = self._usuario(
             "superAdmin@inLinePadel.com",
             PASSWORD_SUPER,
@@ -78,7 +55,6 @@ class Command(BaseCommand):
             last_name="Sur",
         )
 
-        # ------------------------------------------------------- zonas y clubes
         zona_norte = self._zona("Norte")
         zona_sur = self._zona("Sur")
         zona_centro = self._zona("Centro")
@@ -93,14 +69,12 @@ class Command(BaseCommand):
             zona_centro, "Padel Central", "Av. Corrientes 1234", admin_norte
         )
 
-        # ------------------------------------------------------------ canchas
         norte_1 = self._cancha(club_norte, 1, Cancha.Tipo.TECHADA)
         norte_2 = self._cancha(club_norte, 2, Cancha.Tipo.DESCUBIERTA)
         sur_1 = self._cancha(club_sur, 1, Cancha.Tipo.TECHADA)
         sur_2 = self._cancha(club_sur, 2, Cancha.Tipo.DESCUBIERTA)
         centro_1 = self._cancha(club_centro, 1, Cancha.Tipo.TECHADA)
 
-        # ---------------------------------------------------------- jugadores
         jugadores = {}
         for username, nombre, apellido, posicion, zona in [
             ("demo@inlinepadel.com", "María", "López", Jugador.Posiciones.DRIVE, zona_norte),
@@ -120,14 +94,12 @@ class Command(BaseCommand):
         nico = jugadores["nico@inlinepadel.com"]
         sofia = jugadores["sofia@inlinepadel.com"]
 
-        # ------------------------------------------------------------ turnos
         manana = timezone.localdate() + timedelta(days=1)
 
         for cancha in (norte_1, norte_2, sur_1, sur_2, centro_1):
             for hora in HORAS:
                 self._turno(cancha, manana, hora, 2000 + hora.hour * 50)
 
-        # Disponibilidad extra en los próximos días.
         for offset in (3, 5):
             fecha = timezone.localdate() + timedelta(days=offset)
             for cancha in (norte_1, sur_1, centro_1):
@@ -139,22 +111,14 @@ class Command(BaseCommand):
         turno_c = self._turno(sur_1, manana, time(19, 30), 2400)
         turno_d = self._turno(norte_1, manana, time(21, 0), 2500)
 
-        # ----------------------------------------------------------- lobbies
-        # A: público abierto, capitana María, con Carlos y una invitación a Sofía.
         lobby_a = self._lobby(turno_a, maria, [carlos])
-        # B: público abierto, capitana Lucía, con Nico y Sofía (3/4).
         lobby_b = self._lobby(turno_b, lucia, [nico, sofia])
-        # C: privado abierto, capitán Carlos, con María y pedido de Sofía.
         lobby_c = self._lobby(turno_c, carlos, [maria], privacidad=Lobby.Privacidad.PRIVADO)
-        # D: público completo, capitán Nico, con María, Carlos y Lucía.
         lobby_d = self._lobby(turno_d, nico, [maria, carlos, lucia])
 
-        # E: lobby pasado completo con código fijo: sirve para el check-in ya.
         lobby_check_in = self._lobby_check_in(sofia, maria, carlos, nico)
-        # F: lobby pasado jugado: aparece en el historial de los jugadores.
         lobby_jugado = self._lobby_jugado(maria, carlos, lucia, nico)
 
-        # -------------------------------------------------------------- social
         self._contacto(maria, carlos, Contacto.Estado.ACEPTADO)
         self._contacto(carlos, lucia, Contacto.Estado.ACEPTADO)
         self._contacto(sofia, lucia, Contacto.Estado.PENDIENTE)
@@ -179,7 +143,6 @@ class Command(BaseCommand):
         ):
             SolicitudAcceso.objects.create(lobby=lobby_c, jugador=sofia)
 
-        # ------------------------------------------------------------- resumen
         self.stdout.write(self.style.SUCCESS("Datos demo listos."))
         self.stdout.write("")
         self.stdout.write("Credenciales:")
@@ -203,16 +166,10 @@ class Command(BaseCommand):
             "El check-in con CHK-DEMO funciona ya porque el turno es pasado; "
             "para repetirlo, volvé a correr este comando."
         )
-        if superadmin is None:  # pragma: no cover - sólo documenta la intención
+        if superadmin is None:
             self.stdout.write(self.style.WARNING("No se pudo crear el superusuario."))
 
-    # ------------------------------------------------------------- helpers
     def _limpiar_lobbies_vencidos(self):
-        """Cancela lobbies en formación cuyo turno ya pasó (corridas anteriores).
-
-        Sin esto, al re-ejecutar el seed en otra fecha los capitanes acumulan
-        partidas en formación y no se pueden crear las nuevas.
-        """
         vencidos = Lobby.objects.filter(
             estado=Lobby.Estado.EN_FORMACION,
             turno__inicio__lt=timezone.now(),
@@ -230,7 +187,6 @@ class Command(BaseCommand):
             )
 
     def _usuario(self, username, password, **extra):
-        """Crea/actualiza un usuario con username = email y la clave indicada."""
         usuario, creado = Usuario.objects.get_or_create(
             username=username,
             defaults={"email": username, **extra},
@@ -306,7 +262,6 @@ class Command(BaseCommand):
         return jugador
 
     def _lobby(self, turno, capitan, jugadores, privacidad=Lobby.Privacidad.PUBLICO):
-        """Crea (o reutiliza) el lobby del turno y asegura sus inscriptos."""
         existente = (
             Lobby.objects.filter(turno=turno)
             .exclude(estado=Lobby.Estado.CANCELADO)
@@ -337,7 +292,6 @@ class Command(BaseCommand):
         return existente
 
     def _lobby_check_in(self, *jugadores):
-        """Lobby pasado con código fijo, reseteable para repetir el check-in."""
         lobby = Lobby.objects.filter(codigo_reserva=CODIGO_CHECK_IN).first()
         if lobby is None:
             turno = self._turno(
@@ -355,7 +309,6 @@ class Command(BaseCommand):
                 Lobby.Privacidad.PRIVADO,
             )
         else:
-            # el demo quedó jugado en una corrida anterior: se restaura
             Lobby.objects.filter(pk=lobby.pk).update(
                 estado=Lobby.Estado.COMPLETO, codigo_reserva=CODIGO_CHECK_IN
             )
@@ -366,7 +319,6 @@ class Command(BaseCommand):
         return lobby
 
     def _lobby_jugado(self, *jugadores):
-        """Lobby pasado ya jugado, para el historial."""
         lobby = Lobby.objects.filter(codigo_reserva=CODIGO_JUGADO).first()
         if lobby is None:
             turno = self._turno(

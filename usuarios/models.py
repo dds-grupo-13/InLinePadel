@@ -35,12 +35,6 @@ class Jugador(models.Model):
     )
 
     def dar_de_baja(self):
-        """Desactiva al usuario sin dejar partidas colgadas.
-
-        Sale de los lobbies vigentes (si era capitán la capitanía pasa al
-        siguiente inscripto o el lobby se cancela) y vence sus pedidos pendientes.
-        """
-        # imports locales: partidas y social dependen de usuarios, no al revés
         from partidas.models import Lobby
         from social.models import Invitacion, SolicitudAcceso
         from social.notificaciones import notificar

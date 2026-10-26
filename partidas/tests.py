@@ -53,7 +53,6 @@ class LobbyAPITests(BaseAPITestCase):
     def test_solape_horario_del_mismo_jugador(self):
         j = self.jugador("cap")
         self.assertEqual(self.crear(j, self.turno(self.cancha, hora=20)).status_code, 201)
-        # otra cancha, mismo día y hora → el jugador ya juega en ese horario
         r = self.crear(j, self.turno(self.otra_cancha, hora=20))
         self.assertEqual(r.status_code, 400)
         self.assertIn("horario", str(r.data))
@@ -73,11 +72,9 @@ class LobbyAPITests(BaseAPITestCase):
         self.assertRegex(r.data["codigo_reserva"], r"^[0-9A-F]{4}-[0-9A-F]{4}$")
         t.refresh_from_db()
         self.assertEqual(t.estado, "CONFIRMADO")
-        # el quinto jugador ve el lobby completo (404 por no estar en la oferta) y no entra
         self.login(self.jugador("j5").usuario)
         self.assertIn(self.client.post(f"{URL}{lobby_id}/unirse/").status_code, (404, 409))
         self.assertEqual(Lobby.objects.get().inscripciones.count(), 4)
-        # el club valida el código (recién cuando se habilita el check-in)
         self.login(self.admin)
         codigo = Lobby.objects.get().codigo_reserva
         self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)

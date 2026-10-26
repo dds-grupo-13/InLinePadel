@@ -26,7 +26,7 @@ class ZonaViewSet(viewsets.ModelViewSet):
     queryset = Zona.objects.all().order_by("nombre")
     serializer_class = ZonaSerializer
     permission_classes = [SoloLecturaOAdminSistema]
-    pagination_class = None  # catálogo chico, se carga entero en los filtros
+    pagination_class = None
 
 
 class ClubViewSet(viewsets.ModelViewSet):
@@ -55,8 +55,6 @@ class ClubViewSet(viewsets.ModelViewSet):
         club.save(update_fields=["estado"])
         return Response(self.get_serializer(club).data)
 
-    # La suspensión no toca las reservas ya confirmadas: el listado de turnos
-    # libres solo ofrece los de clubes ACTIVOS (ver TurnoViewSet).
     @action(detail=True, methods=["post"])
     def suspender(self, request, pk=None):
         return self._cambiar_estado(Club.Estado.SUSPENDIDO)
@@ -70,7 +68,6 @@ class ClubViewSet(viewsets.ModelViewSet):
         return self._cambiar_estado(Club.Estado.BAJA)
 
     def perform_destroy(self, instance):
-        # un club con historial no se borra: se da de baja
         instance.estado = Club.Estado.BAJA
         instance.save(update_fields=["estado"])
 
@@ -112,7 +109,6 @@ class CanchaViewSet(viewsets.ModelViewSet):
         return qs.filter(activa=True, club__estado=Club.Estado.ACTIVO)
 
     def perform_destroy(self, instance):
-        # PROTECT: una cancha con turnos (historial) se desactiva
         if instance.turnos.exists():
             instance.activa = False
             instance.save(update_fields=["activa"])
@@ -138,7 +134,6 @@ class TurnoViewSet(viewsets.ModelViewSet):
             return qs
         if user.is_staff:
             return qs.filter(cancha__club__admin=user)
-        # los jugadores solo ven la oferta vigente: turnos LIBRES de clubes activos
         return qs.filter(
             estado=Turno.Estado.LIBRE,
             cancha__activa=True,

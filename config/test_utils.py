@@ -10,8 +10,6 @@ from usuarios.models import Jugador, Usuario
 
 
 class BaseAPITestCase(APITestCase):
-    """Datos comunes: una zona, un club con su admin, una cancha y helpers."""
-
     @classmethod
     def setUpTestData(cls):
         cls.zona = Zona.objects.create(nombre="Tigre")
@@ -32,7 +30,7 @@ class BaseAPITestCase(APITestCase):
         cls.otra_cancha = Cancha.objects.create(numero=1, club=cls.otro_club)
 
     def setUp(self):
-        cache.clear()  # los throttles viven en la cache
+        cache.clear()
 
     @staticmethod
     def jugador(nombre):

@@ -3,7 +3,6 @@ from config.test_utils import BaseAPITestCase
 
 class UsuariosAPITests(BaseAPITestCase):
     def login_jwt(self, username="ana", password="clave12345"):
-        """Login real: devuelve la respuesta y deja el access en el cliente."""
         r = self.client.post(
             "/api/usuarios/auth/login/", {"username": username, "password": password}
         )
@@ -109,12 +108,11 @@ class UsuariosAPITests(BaseAPITestCase):
         r = self.client.patch(
             url, {"usuario": {"password": "12345678", "password_actual": "clave12345"}}, format="json"
         )
-        self.assertEqual(r.status_code, 400)  # no pasa los validadores
+        self.assertEqual(r.status_code, 400)
         r = self.client.patch(
             url, {"usuario": {"password": "otraclave987", "password_actual": "clave12345"}}, format="json"
         )
         self.assertEqual(r.status_code, 200, r.data)
-        # el access sigue valiendo tras el cambio
         self.assertEqual(self.client.get(url).status_code, 200)
         self.client.credentials()
         r = self.login_jwt(password="otraclave987")
@@ -137,7 +135,6 @@ class UsuariosAPITests(BaseAPITestCase):
         self.assertEqual(self.client.delete(f"/api/usuarios/jugadores/{cap.pk}/").status_code, 204)
         cap.usuario.refresh_from_db()
         self.assertFalse(cap.usuario.is_active)
-        # la capitanía pasó al otro jugador y el lobby en solitario se canceló
         self.assertEqual(Lobby.objects.get(pk=con_otro).capitan_id, otro.pk)
         self.assertEqual(Lobby.objects.get(turno=solo).estado, "CANCELADO")
         self.assertFalse(Lobby.objects.get(pk=con_otro).inscripciones.filter(jugador=cap).exists())

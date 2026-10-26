@@ -7,7 +7,6 @@ from django.utils import timezone
 
 from config.exceptions import Conflicto, ErrorDominio
 
-# Create your models here.
 
 ESTADO_CANCELADO = "CANCELADO"
 
@@ -15,9 +14,7 @@ class Lobby(models.Model):
     CANTIDAD_CUPOS = 4
     MAX_LOBBIES_EN_FORMACION = 2
     HORAS_PLAZO = 48
-    # plazo mínimo que se concede al reabrirse un lobby completo por un abandono
     HORAS_PLAZO_REAPERTURA = 12
-    # cuánto antes de fecha_check_in el club puede validar el código de reserva
     MINUTOS_ANTICIPO_CHECK_IN = 15
 
     class Estado(models.TextChoices):
@@ -46,7 +43,6 @@ class Lobby(models.Model):
     plazo_limite = models.DateTimeField()
     fecha_check_in = models.DateTimeField()
 
-    # se emite al ocuparse el último cupo (reserva en firme)
     codigo_reserva = models.CharField(
         max_length=9, unique=True, null=True, blank=True, editable=False
     )
@@ -68,9 +64,7 @@ class Lobby(models.Model):
         verbose_name_plural = "Lobbies"
 
         indexes = [
-            # listado de lobbies públicos abiertos
             models.Index(fields=["estado", "privacidad"], name="lobby_estado_privacidad_idx"),
-            # barrido de lobbies vencidos
             models.Index(fields=["estado", "plazo_limite"], name="lobby_estado_plazo_idx"),
         ]
 
@@ -100,12 +94,9 @@ class Lobby(models.Model):
         if self.fecha_check_in > self.turno.inicio:
             raise ValidationError("El check-in debe ser anterior al inicio del turno.")
 
-    # Las transiciones de estado usan UPDATE condicional (compare-and-swap): es
-    # atómico en cualquier base y no depende de select_for_update (que SQLite ignora).
 
     @classmethod
     def conflicto_horario(cls, jugador, turno, excluir_lobby=None):
-        """Lobby vigente del jugador cuyo turno se superpone con `turno` (o None)."""
         vigentes = cls.objects.filter(
             inscripciones__jugador=jugador,
             estado__in=(cls.Estado.EN_FORMACION, cls.Estado.COMPLETO),
@@ -118,9 +109,7 @@ class Lobby(models.Model):
 
     @classmethod
     def crear(cls, turno, capitan, **campos):
-        """Crea el lobby, bloquea el turno e inscribe al capitán en el cupo 1."""
         Turno = cls._meta.get_field("turno").related_model
-        # el plazo es fijo: creación + 48 h, sin pasar del horario del turno
         campos.setdefault("fecha_check_in", turno.inicio)
         campos.setdefault(
             "plazo_limite",
@@ -133,9 +122,6 @@ class Lobby(models.Model):
         if turno.inicio <= timezone.now():
             raise ErrorDominio("El turno ya comenzó o ya pasó.")
         with transaction.atomic():
-            # serializa las altas del mismo capitán: sin esto dos pedidos simultáneos
-            # podrían saltearse el tope de lobbies y el chequeo de solape
-            # (no-op en SQLite, que serializa escrituras)
             Jugador = cls._meta.get_field("capitan").related_model
             Jugador.objects.select_for_update().filter(pk=capitan.pk).first()
             en_formacion = cls.objects.filter(
@@ -158,8 +144,6 @@ class Lobby(models.Model):
             if not bloqueado:
                 raise Conflicto("El turno ya fue tomado por otro jugador.")
             turno.estado = Turno.Estado.BLOQUEADO
-            # full_clean aplica las reglas de clean() (ej: check-in antes del turno);
-            # si falla, el atomic revierte el bloqueo del turno
             lobby = cls(turno=turno, capitan=capitan, **campos)
             lobby.full_clean()
             lobby.save()
@@ -174,13 +158,8 @@ class Lobby(models.Model):
             return lobby
 
     def inscribir(self, jugador):
-        # Los unique constraints (lobby, cupo) y (lobby, jugador) garantizan la
-        # consistencia ante inscripciones concurrentes; si dos toman el mismo
-        # cupo, el perdedor reintenta con el siguiente libre.
         for _ in range(self.CANTIDAD_CUPOS):
             with transaction.atomic():
-                # serializa las inscripciones del mismo jugador para que el
-                # chequeo de solape sea confiable (no-op en SQLite)
                 type(jugador).objects.select_for_update().filter(pk=jugador.pk).first()
                 superpuesto = Lobby.conflicto_horario(
                     jugador, self.turno, excluir_lobby=self.pk
@@ -211,21 +190,18 @@ class Lobby(models.Model):
                 except IntegrityError:
                     if Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).exists():
                         raise ErrorDominio("El jugador ya está inscripto en este lobby")
-                    continue  # cupo tomado por otro: reintentar
+                    continue
                 if len(ocupados) + 1 >= self.CANTIDAD_CUPOS:
                     Lobby.objects.filter(
                         pk=self.pk, estado=self.Estado.EN_FORMACION
                     ).update(estado=self.Estado.COMPLETO)
                     self.estado = self.Estado.COMPLETO
                     self._confirmar_reserva()
-                    # con el lobby completo ya no hay cupo para pedidos pendientes
                     self._expirar_pendientes()
                 return inscripcion
         raise ErrorDominio("No se pudo asignar un cupo, reintentá")
 
     def abandonar(self, jugador):
-        """Libera el cupo del jugador. Si era el capitán, pasa al primero en
-        haberse inscripto; si no queda nadie, el lobby se cancela."""
         with transaction.atomic():
             lobby = Lobby.objects.get(pk=self.pk)
             if lobby.estado not in (self.Estado.EN_FORMACION, self.Estado.COMPLETO):
@@ -236,15 +212,11 @@ class Lobby(models.Model):
             if not borradas:
                 raise ErrorDominio("El jugador no está inscripto en este lobby")
 
-            # al liberarse un cupo vuelve a estar abierto; si el turno ya estaba
-            # confirmado (via API) deja de estarlo hasta que se complete de nuevo
             reabierto = Lobby.objects.filter(
                 pk=self.pk, estado=self.Estado.COMPLETO
             ).update(estado=self.Estado.EN_FORMACION)
             if reabierto:
                 Turno = self._meta.get_field("turno").related_model
-                # el plazo original pudo haber vencido mientras estaba completo: se
-                # concede un mínimo (sin pasar del check-in) para que pueda volver a llenarse
                 plazo = max(
                     lobby.plazo_limite,
                     min(
@@ -290,7 +262,6 @@ class Lobby(models.Model):
             self._notificar_liberacion()
 
     def _confirmar_reserva(self):
-        """Pasa el turno a CONFIRMADO, emite el código y avisa a jugadores y club."""
         from social.notificaciones import notificar
 
         Turno = self._meta.get_field("turno").related_model
@@ -331,8 +302,6 @@ class Lobby(models.Model):
         )
 
     def _expirar_pendientes(self):
-        """Vence las invitaciones y solicitudes de acceso que siguen pendientes."""
-        # import local: social depende de partidas (FK a Lobby), no al revés
         from social.models import Invitacion, SolicitudAcceso
 
         for modelo in (Invitacion, SolicitudAcceso):
@@ -348,7 +317,6 @@ class Inscripcion(models.Model):
         related_name="inscripciones"
     )
 
-    # PROTECT: conserva el historial; un usuario se desactiva (is_active=False)
     jugador = models.ForeignKey(
         "usuarios.Jugador",
         on_delete=models.PROTECT,

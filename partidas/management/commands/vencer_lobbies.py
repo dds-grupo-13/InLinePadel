@@ -24,7 +24,7 @@ class Command(BaseCommand):
                 lobby.cancelar()
                 cancelados += 1
             except ValueError:
-                continue  # otro proceso lo cambió en el medio
+                continue
 
         jugados = Lobby.objects.filter(
             estado=Lobby.Estado.COMPLETO, turno__fin__lt=ahora

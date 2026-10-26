@@ -9,26 +9,22 @@ from rest_framework.views import exception_handler
 
 logger = logging.getLogger(__name__)
 
-# SQLSTATE de Postgres: lock_not_available (lock_timeout), serialization_failure, deadlock_detected
 _SQLSTATE_BLOQUEO = {"55P03", "40001", "40P01"}
 
 
 class ErrorDominio(ValueError):
-    """Regla de negocio incumplida por el pedido (HTTP 400).
-
-    Un ValueError "pelado" ya no se traduce a 400: sería un bug y debe verse como 500.
-    """
+    pass
 
 
 class Conflicto(ErrorDominio):
-    """Operación rechazada por estado/concurrencia (HTTP 409)."""
+    pass
 
 
 def _es_falla_de_bloqueo(exc):
     sqlstate = getattr(exc.__cause__, "sqlstate", None)
     if sqlstate is not None:
         return sqlstate in _SQLSTATE_BLOQUEO
-    return "locked" in str(exc).lower()  # SQLite: "database is locked"
+    return "locked" in str(exc).lower()
 
 
 def _respuesta(detalle, codigo):
@@ -44,8 +40,6 @@ def manejador_excepciones(exc, context):
     if isinstance(exc, ErrorDominio):
         return _respuesta(str(exc), status.HTTP_400_BAD_REQUEST)
     if isinstance(exc, OperationalError) and _es_falla_de_bloqueo(exc):
-        # lock_timeout vencido, deadlock o falla de serialización; el resto
-        # (base caída, etc.) sigue de largo y termina en un 500 logueado
         logger.warning("Falla de bloqueo en la base", exc_info=exc)
         return _respuesta(
             "El recurso está siendo utilizado por otra operación. Reintentá en unos segundos.",

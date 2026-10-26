@@ -21,8 +21,6 @@ from .serializers import (
 
 
 class LoginRateThrottle(SimpleRateThrottle):
-    """10 intentos de inicio de sesión cada 15 minutos por IP (RNF05)."""
-
     scope = "login"
     cache_key_prefix = "login"
 
@@ -37,8 +35,6 @@ class LoginRateThrottle(SimpleRateThrottle):
 
 
 class AuthViewSet(viewsets.ViewSet):
-    """JWT: login / refresh / logout."""
-
     permission_classes = [AllowAny]
 
     @action(detail=False, methods=["post"], throttle_classes=[LoginRateThrottle])
@@ -97,8 +93,6 @@ def _perfil(usuario):
 
 
 class JugadorViewSet(viewsets.ModelViewSet):
-    """Registro (público), perfil propio y buscador de jugadores."""
-
     queryset = Jugador.objects.select_related("usuario", "zona").filter(
         usuario__is_active=True
     )
@@ -130,13 +124,11 @@ class JugadorViewSet(viewsets.ModelViewSet):
 
     def check_object_permissions(self, request, obj):
         super().check_object_permissions(request, obj)
-        # solo el dueño modifica su perfil (BOLA); terceros solo ven datos públicos
         if self.action != "retrieve" and obj.pk != request.user.pk:
             self.permission_denied(request, message="No podés modificar el perfil de otro jugador.")
 
     def perform_destroy(self, instance):
         instance.dar_de_baja()
-        # invalida todos los refresh vigentes del usuario dado de baja
         for token in OutstandingToken.objects.filter(user=instance.usuario):
             BlacklistedToken.objects.get_or_create(token=token)
 

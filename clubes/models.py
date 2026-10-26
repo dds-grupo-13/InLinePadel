@@ -5,7 +5,6 @@ from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
 
-# Create your models here.
 class Zona(models.Model):
     nombre = models.CharField(max_length=100)
 
@@ -38,7 +37,6 @@ class Club(models.Model):
         related_name="clubes",
     )
 
-    # PROTECT: un club no puede quedar sin admin; se reasigna antes de borrar al usuario
     admin = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -59,7 +57,6 @@ class Club(models.Model):
 
     def clean(self):
         super().clean()
-        # limit_choices_to solo filtra formularios; acá se garantiza la regla
         if self.admin_id and not self.admin.is_staff:
             raise ValidationError({"admin": "El admin del club debe ser staff."})
 
@@ -92,7 +89,6 @@ class Cancha(models.Model):
         related_name="canchas",
     )
 
-    # .con_club() evita una query por fila al renderizar __str__
     objects = CanchaQuerySet.as_manager()
 
     class Meta:
@@ -115,12 +111,6 @@ class TurnoQuerySet(models.QuerySet):
         return self.select_related("cancha", "cancha__club")
 
     def crear_masivo(self, turnos):
-        """Crea muchos turnos de una (ej: toda la semana de un club).
-
-        Es la única vía para crear turnos en lote: calcula inicio/fin, valida
-        los campos y chequea solapes entre los nuevos y contra los existentes
-        (una query por cancha). Si alguno falla no se crea ninguno.
-        """
         turnos = list(turnos)
         por_cancha = {}
         for turno in turnos:
@@ -131,8 +121,6 @@ class TurnoQuerySet(models.QuerySet):
             por_cancha.setdefault(turno.cancha_id, []).append(turno)
 
         with transaction.atomic():
-            # bloquea las canchas para que otro proceso no inserte solapes entre
-            # el chequeo y el bulk_create (no-op en SQLite, que serializa escrituras)
             list(
                 Cancha.objects.select_for_update()
                 .filter(pk__in=por_cancha)
@@ -160,7 +148,6 @@ class TurnoQuerySet(models.QuerySet):
                             )
             return self.bulk_create(turnos)
 
-    # update()/bulk_update() no pasan por save(): dejarían inicio/fin desfasados
     def update(self, **kwargs):
         self._rechazar_campos_horario(kwargs)
         return super().update(**kwargs)
@@ -203,19 +190,15 @@ class Turno(models.Model):
         default=Estado.LIBRE
     )
 
-    # PROTECT: una cancha con turnos (historial) se desactiva con activa=False
     cancha = models.ForeignKey(
         Cancha,
         on_delete=models.PROTECT,
         related_name="turnos",
     )
 
-    # Derivados de fecha + hora_inicio + duracion (se calculan en save()).
-    # Guardados para poder detectar solapes con una sola query indexada.
     inicio = models.DateTimeField(editable=False)
     fin = models.DateTimeField(editable=False)
 
-    # .con_cancha() evita queries extra por fila al renderizar __str__
     objects = TurnoQuerySet.as_manager()
 
     class Meta:
@@ -229,8 +212,6 @@ class Turno(models.Model):
         ]
 
         constraints = [
-            # red de seguridad a nivel base: el solape general se valida en
-            # save()/crear_masivo(), pero este caso lo garantiza la base
             models.UniqueConstraint(
                 fields=["cancha", "fecha", "hora_inicio"],
                 name="turno_unico_por_cancha_y_horario",
@@ -272,16 +253,11 @@ class Turno(models.Model):
         self._validar_solape()
 
     def save(self, *args, update_fields=None, **kwargs):
-        # Un save(update_fields=["estado"]) no toca el horario: se omite el chequeo
         if update_fields is None or self.CAMPOS_HORARIO & set(update_fields):
             self._calcular_horarios()
             if update_fields is not None:
                 update_fields = {*update_fields, "inicio", "fin"}
-            # Sin exclusion constraints (SQLite): el chequeo y el insert van
-            # juntos en una transaccion
             with transaction.atomic():
-                # bloquea la cancha: serializa altas concurrentes en bases con
-                # row locks (Postgres); en SQLite es no-op
                 Cancha.objects.select_for_update().filter(pk=self.cancha_id).first()
                 self._validar_solape()
                 super().save(*args, update_fields=update_fields, **kwargs)

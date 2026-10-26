@@ -4,14 +4,7 @@ from django.db.models.functions import Greatest, Least
 
 from config.exceptions import Conflicto
 
-# Create your models here.
 
-# on_delete: los FK a Jugador son PROTECT (como Inscripcion): conservan el
-# historial y un usuario se desactiva (is_active=False) en vez de borrarse.
-# Los FK a Lobby son CASCADE (como Inscripcion.lobby) y las notificaciones,
-# que no son historial, se van con su usuario.
-
-# fuera de las clases para poder usarlo en los constraints de Meta
 ESTADO_PENDIENTE = "PENDIENTE"
 
 
@@ -41,7 +34,6 @@ class Contacto(models.Model):
         ACEPTADO = "ACEPTADO", "Aceptado"
         RECHAZADO = "RECHAZADO", "Rechazado"
 
-    # jugador es quien envía la solicitud; contacto, quien la recibe
     jugador = models.ForeignKey(
         "usuarios.Jugador",
         on_delete=models.PROTECT,
@@ -65,7 +57,6 @@ class Contacto(models.Model):
         ordering = ["-fecha"]
 
         constraints = [
-            # unique sobre el par sin orden: impide A->B y B->A a la vez
             models.UniqueConstraint(
                 Least("jugador", "contacto"),
                 Greatest("jugador", "contacto"),
@@ -82,15 +73,7 @@ class Contacto(models.Model):
 
 
 class _PedidoLobby:
-    """Comportamiento común de Invitacion y SolicitudAcceso.
-
-    Quien hereda define `lobby`, `estado`, la clase `Estado` y la propiedad
-    `jugador_a_inscribir` (quien entra al lobby si el pedido se acepta).
-    """
-
     def save(self, *args, **kwargs):
-        # las reglas de clean() aplican solo al crear: las transiciones de
-        # estado posteriores (ej: EXPIRADA con el lobby ya cancelado) no las re-evalúan
         if self._state.adding:
             self.full_clean()
         super().save(*args, **kwargs)
@@ -104,7 +87,6 @@ class _PedidoLobby:
             raise ValidationError({campo: "El jugador ya está inscripto en el lobby."})
 
     def _transicionar(self, nuevo):
-        """Pasa de PENDIENTE a `nuevo` de forma atómica (compare-and-swap)."""
         cambiado = type(self).objects.filter(
             pk=self.pk, estado=self.Estado.PENDIENTE
         ).update(estado=nuevo)
@@ -113,7 +95,6 @@ class _PedidoLobby:
         self.estado = nuevo
 
     def aceptar(self):
-        """Acepta el pedido e inscribe al jugador. Si no hay cupo, nada cambia."""
         with transaction.atomic():
             self._transicionar(self.Estado.ACEPTADA)
             self.lobby.inscribir(self.jugador_a_inscribir)
@@ -167,7 +148,6 @@ class SolicitudAcceso(_PedidoLobby, models.Model):
         super().clean()
         if not (self.lobby_id and self.jugador_id):
             return
-        # en un lobby público el jugador se inscribe directo, sin pedir acceso
         if self.lobby.privacidad != self.lobby.Privacidad.PRIVADO:
             raise ValidationError("Solo se puede pedir acceso a un lobby privado.")
         self._validar_lobby_abierto()

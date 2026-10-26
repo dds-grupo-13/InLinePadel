@@ -19,13 +19,11 @@ class LobbyFilter(django_filters.FilterSet):
         fields = ["privacidad", "estado"]
 
     def filtrar_con_cupos(self, queryset, name, value):
-        # `ocupados` lo anota LobbyViewSet.get_queryset
         if value:
             return queryset.filter(ocupados__lt=Lobby.CANTIDAD_CUPOS)
         return queryset.filter(ocupados__gte=Lobby.CANTIDAD_CUPOS)
 
     def filtrar_precio_max(self, queryset, name, value):
-        # precio máximo por jugador = precio del turno / cantidad de cupos
         return queryset.filter(turno__precio__lte=value * Lobby.CANTIDAD_CUPOS)
 
     def filtrar_mios(self, queryset, name, value):

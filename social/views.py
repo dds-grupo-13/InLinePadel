@@ -136,7 +136,6 @@ class InvitacionViewSet(
             with transaction.atomic():
                 invitacion.aceptar()
         except Conflicto:
-            # FA3: no quedan cupos al aceptar, la invitación vence
             Invitacion.objects.filter(
                 pk=invitacion.pk, estado=Invitacion.Estado.PENDIENTE
             ).update(estado=Invitacion.Estado.EXPIRADA)
@@ -167,12 +166,10 @@ class SolicitudAccesoViewSet(
     mixins.RetrieveModelMixin,
     _JugadorViewSet,
 ):
-    """Solo lectura: las partidas privadas se acceden únicamente por invitación."""
     serializer_class = SolicitudAccesoSerializer
     filterset_fields = ["lobby", "estado"]
 
     def get_queryset(self):
-        # las propias y las de las partidas que capitaneo
         return SolicitudAcceso.objects.select_related(
             "jugador__usuario", "lobby"
         ).filter(Q(jugador=self.jugador) | Q(lobby__capitan=self.jugador))
