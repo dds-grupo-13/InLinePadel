@@ -21,7 +21,7 @@ class Command(BaseCommand):
         cancelados = 0
         for lobby in vencidos:
             try:
-                lobby.cancelar()
+                lobby._cancelar(Lobby.CanceladaPor.VENCIMIENTO)
                 cancelados += 1
             except ValueError:
                 continue

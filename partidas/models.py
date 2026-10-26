@@ -15,6 +15,7 @@ class Lobby(models.Model):
     MAX_LOBBIES_EN_FORMACION = 2
     HORAS_PLAZO = 48
     HORAS_PLAZO_REAPERTURA = 12
+    HORAS_CIERRE = 3
     MINUTOS_ANTICIPO_CHECK_IN = 15
 
     class Estado(models.TextChoices):
@@ -39,6 +40,13 @@ class Lobby(models.Model):
         default=Estado.EN_FORMACION,
     )
 
+    class CanceladaPor(models.TextChoices):
+        CAPITAN = "CAPITAN", "Capitán"
+        ABANDONO = "ABANDONO", "Abandono del último jugador"
+        VENCIMIENTO = "VENCIMIENTO", "Vencimiento del plazo"
+        CLUB = "CLUB", "Club"
+        SISTEMA = "SISTEMA", "Sistema"
+
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     plazo_limite = models.DateTimeField()
     fecha_check_in = models.DateTimeField()
@@ -46,6 +54,11 @@ class Lobby(models.Model):
     codigo_reserva = models.CharField(
         max_length=9, unique=True, null=True, blank=True, editable=False
     )
+
+    cancelada_por = models.CharField(
+        max_length=12, choices=CanceladaPor.choices, null=True, blank=True, editable=False
+    )
+    motivo_cancelacion = models.CharField(max_length=200, blank=True, editable=False)
 
     capitan = models.ForeignKey(
         "usuarios.Jugador",
@@ -103,6 +116,29 @@ class Lobby(models.Model):
             self.Estado.JUGADO: "CUMPLIDA",
         }.get(self.estado)
 
+    @staticmethod
+    def cierre_de(turno):
+        return turno.inicio - timedelta(hours=Lobby.HORAS_CIERRE)
+
+    @property
+    def cierre(self):
+        return self.cierre_de(self.turno)
+
+    def es_firme(self, ahora=None):
+        return self.estado == self.Estado.COMPLETO and (
+            ahora or timezone.now()
+        ) >= self.cierre
+
+    def puede_cancelar(self, jugador):
+        return self.capitan_id == jugador.pk and self.estado == self.Estado.EN_FORMACION
+
+    def puede_abandonar(self, jugador, ahora=None):
+        return (
+            self.estado in (self.Estado.EN_FORMACION, self.Estado.COMPLETO)
+            and not self.es_firme(ahora)
+            and any(i.jugador_id == jugador.pk for i in self.inscripciones.all())
+        )
+
     @classmethod
     def conflicto_horario(cls, jugador, turno, excluir_lobby=None):
         vigentes = cls.objects.filter(
@@ -118,10 +154,16 @@ class Lobby(models.Model):
     @classmethod
     def crear(cls, turno, capitan, **campos):
         Turno = cls._meta.get_field("turno").related_model
+        ahora = timezone.now()
+        cierre = cls.cierre_de(turno)
         campos.setdefault("fecha_check_in", turno.inicio)
+        # Una partida de último momento (creada dentro de la ventana de cierre)
+        # tiene plazo hasta el inicio: apenas se completa, queda firme.
         campos.setdefault(
             "plazo_limite",
-            min(timezone.now() + timedelta(hours=cls.HORAS_PLAZO), turno.inicio),
+            min(ahora + timedelta(hours=cls.HORAS_PLAZO), cierre)
+            if ahora < cierre
+            else turno.inicio,
         )
         if turno.cancha.club.estado != "ACTIVO":
             raise ErrorDominio("El club no está habilitado para recibir reservas.")
@@ -228,33 +270,46 @@ class Lobby(models.Model):
         raise ErrorDominio("No se pudo asignar un cupo, reintentá")
 
     def abandonar(self, jugador):
+        from social.notificaciones import notificar
+
         with transaction.atomic():
             lobby = Lobby.objects.select_for_update().get(pk=self.pk)
             if lobby.estado not in (self.Estado.EN_FORMACION, self.Estado.COMPLETO):
-                raise ErrorDominio(f"No se puede abandonar un lobby {lobby.estado}")
-            borradas, _ = Inscripcion.objects.filter(
-                lobby_id=self.pk, jugador=jugador
-            ).delete()
-            if not borradas:
+                raise Conflicto(f"No se puede abandonar un lobby {lobby.estado}")
+            if not Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).exists():
                 raise ErrorDominio("El jugador no está inscripto en este lobby")
+            ahora = timezone.now()
+            if lobby.es_firme(ahora):
+                desde = timezone.localtime(lobby.cierre)
+                raise Conflicto(
+                    f"La reserva ya es firme desde las {desde:%H:%M}: no podés bajarte."
+                )
+            Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).delete()
 
             reabierto = Lobby.objects.filter(
                 pk=self.pk, estado=self.Estado.COMPLETO
             ).update(estado=self.Estado.EN_FORMACION)
             if reabierto:
                 Turno = self._meta.get_field("turno").related_model
-                plazo = max(
-                    lobby.plazo_limite,
-                    min(
-                        timezone.now() + timedelta(hours=self.HORAS_PLAZO_REAPERTURA),
-                        lobby.fecha_check_in,
+                plazo = min(
+                    max(
+                        lobby.plazo_limite,
+                        ahora + timedelta(hours=self.HORAS_PLAZO_REAPERTURA),
                     ),
+                    lobby.cierre,
+                    lobby.fecha_check_in,
                 )
                 Lobby.objects.filter(pk=self.pk).update(codigo_reserva=None, plazo_limite=plazo)
                 self.codigo_reserva = None
                 Turno.objects.filter(
                     pk=self.turno_id, estado=Turno.Estado.CONFIRMADO
                 ).update(estado=Turno.Estado.BLOQUEADO)
+                turno = self.turno
+                notificar(
+                    [turno.cancha.club.admin_id],
+                    f"La reserva de la cancha {turno.cancha.numero} del "
+                    f"{turno.fecha:%d/%m} {turno.hora_inicio:%H:%M} volvió a provisoria.",
+                )
 
             if lobby.capitan_id == jugador.pk:
                 siguiente = (
@@ -263,29 +318,54 @@ class Lobby(models.Model):
                     .first()
                 )
                 if siguiente is None:
-                    self.cancelar()
+                    self._cancelar(self.CanceladaPor.ABANDONO)
                 else:
                     Lobby.objects.filter(pk=self.pk).update(
                         capitan_id=siguiente.jugador_id
                     )
             self.refresh_from_db(fields=["estado", "capitan"])
 
-    def cancelar(self):
+    def cancelar_por_capitan(self, jugador):
+        with transaction.atomic():
+            lobby = Lobby.objects.select_for_update().get(pk=self.pk)
+            if lobby.capitan_id != jugador.pk:
+                raise ErrorDominio("Solo el capitán de la partida puede cancelarla.")
+            if lobby.estado == self.Estado.COMPLETO:
+                if lobby.es_firme():
+                    raise Conflicto(
+                        "La partida ya está completa y la reserva ya es firme: "
+                        "no se puede cancelar."
+                    )
+                hasta = timezone.localtime(lobby.cierre)
+                raise Conflicto(
+                    "La partida ya está completa: no se puede cancelar. "
+                    f"Cada jugador puede bajarse hasta el {hasta:%d/%m %H:%M}."
+                )
+            self._cancelar(self.CanceladaPor.CAPITAN)
+
+    def _cancelar(self, por, motivo="", estado_turno=None):
+        # Solo `por=CLUB` debe usarse sobre un lobby COMPLETO: la validación de las
+        # reglas de cancelación del capitán vive en cancelar_por_capitan.
         Turno = self._meta.get_field("turno").related_model
         with transaction.atomic():
+            Lobby.objects.select_for_update().get(pk=self.pk)
             cancelado = Lobby.objects.filter(
                 pk=self.pk,
                 estado__in=(self.Estado.EN_FORMACION, self.Estado.COMPLETO),
-            ).update(estado=self.Estado.CANCELADO)
+            ).update(
+                estado=self.Estado.CANCELADO, cancelada_por=por, motivo_cancelacion=motivo
+            )
             if not cancelado:
-                raise ErrorDominio("Solo se puede cancelar un lobby en formación o completo")
+                raise ErrorDominio("Solo se puede cancelar una partida en formación o completa")
             Turno.objects.filter(
                 pk=self.turno_id,
                 estado__in=(Turno.Estado.BLOQUEADO, Turno.Estado.CONFIRMADO),
-            ).update(estado=Turno.Estado.LIBRE)
+            ).update(estado=estado_turno or Turno.Estado.LIBRE)
             self.estado = self.Estado.CANCELADO
+            self.cancelada_por = por
+            self.motivo_cancelacion = motivo
             self._expirar_pendientes()
-            self._notificar_liberacion()
+            self._notificar_cancelacion(por, motivo)
 
     def _confirmar_reserva(self):
         from social.notificaciones import notificar
@@ -315,11 +395,18 @@ class Lobby(models.Model):
             f"a las {turno.hora_inicio:%H:%M}.",
         )
 
-    def _notificar_liberacion(self):
+    def _notificar_cancelacion(self, por, motivo):
         from social.notificaciones import notificar
 
         turno = self.turno
         usuarios = list(self.inscripciones.values_list("jugador__usuario_id", flat=True))
+        if por == self.CanceladaPor.CLUB:
+            notificar(
+                usuarios,
+                f"El club {turno.cancha.club.denominacion} canceló la partida del "
+                f"{turno.fecha:%d/%m} a las {turno.hora_inicio:%H:%M}: {motivo}.",
+            )
+            return
         usuarios.append(turno.cancha.club.admin_id)
         notificar(
             usuarios,

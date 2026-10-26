@@ -109,34 +109,63 @@ class ConcurrenciaTests(TransactionTestCase):
         self.turno.refresh_from_db()
         self.assertEqual(self.turno.estado, Turno.Estado.BLOQUEADO)
 
-    def test_c_cancelar_y_ocupar_el_ultimo_cupo_nunca_dejan_estado_inconsistente(self):
+    def test_c_cancelar_en_formacion_y_ocupar_el_ultimo_cupo_ganan_uno_solo(self):
         for ronda in range(10):
             with self.subTest(ronda=ronda):
                 turno = self.nuevo_turno(dias=10 + ronda, hora=9)
-                lobby = Lobby.crear(turno, self.jugador(f"cap{ronda}"))
+                capitan = self.jugador(f"cap{ronda}")
+                lobby = Lobby.crear(turno, capitan)
                 for nombre in ("j2", "j3"):
                     lobby.inscribir(self.jugador(f"{nombre}_{ronda}"))
                 ultimo = self.jugador(f"ultimo{ronda}")
 
                 resultados = self.en_paralelo(
                     [
-                        lambda: Lobby.objects.get(pk=lobby.pk).cancelar(),
+                        lambda: Lobby.objects.get(pk=lobby.pk).cancelar_por_capitan(capitan),
                         lambda: Lobby.objects.get(pk=lobby.pk).inscribir(ultimo),
                     ]
                 )
 
                 self.assertEqual([r[1] for r in resultados if r[0] == "error"], [])
                 cancelar, inscribir = resultados
-                self.assertEqual(cancelar[0], "ok")
+                # Exactamente uno de los dos pudo hacer su operación.
+                self.assertEqual([cancelar[0], inscribir[0]].count("ok"), 1)
                 lobby.refresh_from_db()
                 turno.refresh_from_db()
-                self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
-                self.assertEqual(turno.estado, Turno.Estado.LIBRE)
-                if inscribir[0] == "conflicto":
-                    # La cancelación ganó: nadie confirmó nada.
+                if cancelar[0] == "ok":
+                    self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
                     self.assertIsNone(lobby.codigo_reserva)
                     self.assertEqual(lobby.inscripciones.count(), 3)
+                    self.assertEqual(turno.estado, Turno.Estado.LIBRE)
                 else:
-                    # El lobby se completó y recién después se canceló (regla
-                    # vigente de cancelar un lobby COMPLETO).
+                    self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
+                    self.assertIsNotNone(lobby.codigo_reserva)
                     self.assertEqual(lobby.inscripciones.count(), 4)
+                    self.assertEqual(turno.estado, Turno.Estado.CONFIRMADO)
+
+    def test_d_bajarse_y_ocupar_el_ultimo_cupo_terminan_en_formacion(self):
+        for ronda in range(10):
+            with self.subTest(ronda=ronda):
+                turno = self.nuevo_turno(dias=10 + ronda, hora=9)
+                lobby = Lobby.crear(turno, self.jugador(f"cap{ronda}"))
+                j2 = self.jugador(f"j2_{ronda}")
+                lobby.inscribir(j2)
+                lobby.inscribir(self.jugador(f"j3_{ronda}"))
+                ultimo = self.jugador(f"ultimo{ronda}")
+
+                resultados = self.en_paralelo(
+                    [
+                        lambda: Lobby.objects.get(pk=lobby.pk).abandonar(j2),
+                        lambda: Lobby.objects.get(pk=lobby.pk).inscribir(ultimo),
+                    ]
+                )
+
+                self.assertEqual([r[1] for r in resultados if r[0] == "error"], [])
+                self.assertEqual([r[0] for r in resultados], ["ok", "ok"])
+                lobby.refresh_from_db()
+                turno.refresh_from_db()
+                # Se complete antes o después, el que se bajó deja un cupo libre.
+                self.assertEqual(lobby.estado, Lobby.Estado.EN_FORMACION)
+                self.assertEqual(lobby.inscripciones.count(), 3)
+                self.assertIsNone(lobby.codigo_reserva)
+                self.assertEqual(turno.estado, Turno.Estado.BLOQUEADO)

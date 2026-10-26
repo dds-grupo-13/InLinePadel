@@ -96,7 +96,7 @@ class InvitacionTests(SocialBaseTestCase):
         self.assertIn("receptor", ctx.exception.message_dict)
 
     def test_lobby_que_no_esta_en_formacion(self):
-        self.privado.cancelar()
+        self.privado.cancelar_por_capitan(self.privado.capitan)
         with self.assertRaises(ValidationError):
             self.invitar().save()
 
@@ -152,7 +152,7 @@ class InvitacionTests(SocialBaseTestCase):
     def test_las_validaciones_no_se_repiten_al_cambiar_de_estado(self):
         invitacion = self.invitar()
         invitacion.save()
-        self.privado.cancelar()
+        self.privado.cancelar_por_capitan(self.privado.capitan)
         invitacion.refresh_from_db()
         self.assertEqual(invitacion.estado, Invitacion.Estado.EXPIRADA)
         invitacion.estado = Invitacion.Estado.RECHAZADA
@@ -182,7 +182,7 @@ class SolicitudAccesoTests(SocialBaseTestCase):
         self.assertIn("jugador", ctx.exception.message_dict)
 
     def test_lobby_que_no_esta_en_formacion(self):
-        self.privado.cancelar()
+        self.privado.cancelar_por_capitan(self.privado.capitan)
         with self.assertRaises(ValidationError):
             self.solicitar().save()
 

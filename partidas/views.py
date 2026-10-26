@@ -145,7 +145,9 @@ class LobbyViewSet(viewsets.ModelViewSet):
         lobby = self.get_object()
         self._exigir_capitan(lobby)
         try:
-            lobby.cancelar()
+            lobby.cancelar_por_capitan(request.user.jugador)
+        except Conflicto:
+            raise
         except ValueError as e:
             raise Conflicto(str(e))
         return Response(status=status.HTTP_204_NO_CONTENT)

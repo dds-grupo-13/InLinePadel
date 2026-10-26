@@ -177,7 +177,7 @@ class Command(BaseCommand):
         cancelados = 0
         for lobby in vencidos:
             try:
-                lobby.cancelar()
+                lobby._cancelar(Lobby.CanceladaPor.SISTEMA)
                 cancelados += 1
             except (ErrorDominio, Conflicto):
                 pass

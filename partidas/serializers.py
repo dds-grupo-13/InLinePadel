@@ -40,6 +40,11 @@ class LobbySerializer(serializers.ModelSerializer):
     mensaje_reserva = serializers.SerializerMethodField()
     es_capitan = serializers.SerializerMethodField()
     fui_invitado = serializers.SerializerMethodField()
+    cierre = serializers.SerializerMethodField()
+    reserva_firme = serializers.SerializerMethodField()
+    puede_cancelar = serializers.SerializerMethodField()
+    puede_abandonar = serializers.SerializerMethodField()
+    aviso_cierre = serializers.SerializerMethodField()
 
     class Meta:
         model = Lobby
@@ -48,11 +53,13 @@ class LobbySerializer(serializers.ModelSerializer):
             "fecha_check_in", "capitan", "es_capitan", "fui_invitado", "turno",
             "turno_detalle", "inscripciones", "cupos_ocupados", "cupos_libres",
             "precio_total", "precio_por_jugador", "estado_reserva",
-            "mensaje_reserva", "codigo_reserva",
+            "mensaje_reserva", "codigo_reserva", "cierre", "reserva_firme",
+            "puede_cancelar", "puede_abandonar", "cancelada_por",
+            "motivo_cancelacion", "aviso_cierre",
         ]
         read_only_fields = [
             "estado", "fecha_creacion", "plazo_limite", "fecha_check_in",
-            "capitan", "codigo_reserva",
+            "capitan", "codigo_reserva", "cancelada_por", "motivo_cancelacion",
         ]
 
     def _jugador(self):
@@ -87,9 +94,46 @@ class LobbySerializer(serializers.ModelSerializer):
     def get_estado_reserva(self, lobby):
         return lobby.estado_reserva
 
+    def get_cierre(self, lobby):
+        return serializers.DateTimeField().to_representation(lobby.cierre)
+
+    def get_reserva_firme(self, lobby):
+        return lobby.es_firme()
+
+    def get_puede_cancelar(self, lobby):
+        jugador = self._jugador()
+        return bool(jugador) and lobby.puede_cancelar(jugador)
+
+    def get_puede_abandonar(self, lobby):
+        jugador = self._jugador()
+        return bool(jugador) and lobby.puede_abandonar(jugador)
+
+    def get_aviso_cierre(self, lobby):
+        cierre = timezone.localtime(lobby.cierre)
+        if lobby.estado == Lobby.Estado.COMPLETO:
+            if lobby.es_firme():
+                return "Reserva firme: ya no se puede bajar nadie."
+            return f"Podés bajarte hasta el {cierre:%d/%m} a las {cierre:%H:%M}."
+        if (
+            lobby.estado == Lobby.Estado.EN_FORMACION
+            and timezone.now() >= lobby.cierre
+        ):
+            return (
+                "Partida de último momento: cuando se complete, "
+                "la reserva queda firme."
+            )
+        return None
+
     def get_mensaje_reserva(self, lobby):
         if lobby.estado == Lobby.Estado.CANCELADO:
-            return "Partida cancelada — el turno quedó libre"
+            if lobby.cancelada_por == Lobby.CanceladaPor.CLUB:
+                return f"Partida cancelada por el club: {lobby.motivo_cancelacion}"
+            motivo = {
+                Lobby.CanceladaPor.CAPITAN: " por el capitán",
+                Lobby.CanceladaPor.ABANDONO: " porque se fueron todos los jugadores",
+                Lobby.CanceladaPor.VENCIMIENTO: " por vencimiento del plazo",
+            }.get(lobby.cancelada_por, "")
+            return f"Partida cancelada{motivo} — el turno quedó libre"
         if lobby.estado == Lobby.Estado.EN_FORMACION:
             faltan = Lobby.CANTIDAD_CUPOS - self._ocupados(lobby)
             vence = timezone.localtime(lobby.plazo_limite)
