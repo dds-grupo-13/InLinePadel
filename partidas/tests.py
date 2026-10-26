@@ -84,6 +84,40 @@ class LobbyAPITests(BaseAPITestCase):
         t.refresh_from_db()
         self.assertEqual(t.estado, "CUMPLIDO")
 
+    def test_estado_de_reserva_en_ocupacion_y_detalle_hasta_cumplida(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t).data["id"]
+        ocupacion = f"/api/clubes/clubes/{self.club.pk}/ocupacion/"
+
+        def reserva_en_ocupacion():
+            self.login(self.admin)
+            fila = next(
+                f for f in self.client.get(ocupacion).data["results"] if f["id"] == t.pk
+            )
+            return fila["lobby"]["reserva"]
+
+        self.assertEqual(reserva_en_ocupacion(), "PROVISORIA")
+        jugadores = [self.jugador(n) for n in ("j2", "j3", "j4")]
+        for j in jugadores:
+            self.login(j.usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(reserva_en_ocupacion(), "CONFIRMADA")
+
+        codigo = Lobby.objects.get().codigo_reserva
+        self.habilitar_check_in()
+        self.login(self.admin)
+        self.assertEqual(
+            self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 200
+        )
+        self.assertEqual(reserva_en_ocupacion(), "CUMPLIDA")
+
+        self.login(jugadores[0].usuario)
+        detalle = self.client.get(f"{URL}{lobby_id}/").data
+        self.assertEqual(detalle["estado"], "JUGADO")
+        self.assertEqual(detalle["estado_reserva"], "CUMPLIDA")
+        self.assertEqual(detalle["mensaje_reserva"], "Partido jugado — reserva cumplida")
+        self.assertEqual(detalle["codigo_reserva"], codigo)
+
     def test_check_in_de_otro_club_no_funciona(self):
         t = self.turno(self.cancha)
         lobby_id = self.crear(self.jugador("cap"), t).data["id"]

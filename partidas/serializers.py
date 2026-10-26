@@ -78,11 +78,7 @@ class LobbySerializer(serializers.ModelSerializer):
         return bool(getattr(lobby, "es_invitado", False))
 
     def get_estado_reserva(self, lobby):
-        if lobby.estado == Lobby.Estado.CANCELADO:
-            return None
-        if lobby.estado == Lobby.Estado.EN_FORMACION:
-            return "PROVISORIA"
-        return "CONFIRMADA"
+        return lobby.estado_reserva
 
     def get_mensaje_reserva(self, lobby):
         if lobby.estado == Lobby.Estado.CANCELADO:
@@ -94,6 +90,8 @@ class LobbySerializer(serializers.ModelSerializer):
                 f"Reserva provisoria — faltan {faltan} jugadores, "
                 f"vence el {vence:%d/%m} a las {vence:%H:%M}"
             )
+        if lobby.estado == Lobby.Estado.JUGADO:
+            return "Partido jugado — reserva cumplida"
         if self._inscripto(lobby) and lobby.codigo_reserva:
             return f"Reserva confirmada — código {lobby.codigo_reserva}"
         return "Reserva confirmada"

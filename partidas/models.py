@@ -95,6 +95,14 @@ class Lobby(models.Model):
             raise ValidationError("El check-in debe ser anterior al inicio del turno.")
 
 
+    @property
+    def estado_reserva(self):
+        return {
+            self.Estado.EN_FORMACION: "PROVISORIA",
+            self.Estado.COMPLETO: "CONFIRMADA",
+            self.Estado.JUGADO: "CUMPLIDA",
+        }.get(self.estado)
+
     @classmethod
     def conflicto_horario(cls, jugador, turno, excluir_lobby=None):
         vigentes = cls.objects.filter(
