@@ -1,106 +1,226 @@
-from django import forms
-from django.contrib import messages
 from django.db import transaction
-from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse_lazy
-from django.views.generic import CreateView
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Q
+from rest_framework import mixins, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
-from partidas.models import Inscripcion, Lobby
-from usuarios.models import Jugador
+from config.exceptions import Conflicto
+from config.permissions import EsJugador
+from partidas.models import Lobby
 
-from .models import Invitacion
-
-
-class InvitacionForm(forms.ModelForm):
-	class Meta:
-		model = Invitacion
-		fields = ['jugador']
-		labels = {'jugador': 'Selecciona el jugador a invitar'}
-		widgets = {
-			'jugador': forms.Select(attrs={
-				'class': 'w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200',
-			}),
-		}
-
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self.fields['jugador'].queryset = Jugador.objects.select_related('usuario').all()
+from .models import Contacto, Invitacion, Notificacion, SolicitudAcceso
+from .notificaciones import notificar
+from .serializers import (
+    ContactoSerializer,
+    InvitacionSerializer,
+    NotificacionSerializer,
+    SolicitudAccesoSerializer,
+)
 
 
-class InvitacionCreateView(LoginRequiredMixin, CreateView):
-	model = Invitacion
-	form_class = InvitacionForm
-	template_name = 'social/invitacion_form.html'
+class _JugadorViewSet(viewsets.GenericViewSet):
+    permission_classes = [IsAuthenticated, EsJugador]
 
-	def dispatch(self, request, *args, **kwargs):
-		"""
-		Valida que el usuario autenticado sea el capitán del lobby.
-		"""
-		jugador = getattr(request.user, 'jugador', None)
-		if jugador is None:
-			messages.error(request, 'Necesitás tener un perfil de jugador para enviar invitaciones.')
-			return redirect('partidas:lobby_list')
+    @property
+    def jugador(self):
+        return self.request.user.jugador
 
-		lobby = get_object_or_404(Lobby, pk=self.kwargs['lobby_id'])
-		capitan = lobby.inscripciones.filter(numero_cupo=1).select_related('jugador').first()
 
-		if capitan is None or capitan.jugador_id != jugador.pk:
-			messages.error(request, 'Solo el capitán del lobby puede enviar invitaciones.')
-			return redirect('partidas:lobby_detail', pk=lobby.pk)
+class ContactoViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    _JugadorViewSet,
+):
+    serializer_class = ContactoSerializer
+    filterset_fields = ["estado"]
 
-		return super().dispatch(request, *args, **kwargs)
+    def get_queryset(self):
+        return Contacto.objects.select_related(
+            "jugador__usuario", "contacto__usuario"
+        ).filter(Q(jugador=self.jugador) | Q(contacto=self.jugador))
 
-	def get_lobby(self):
-		return get_object_or_404(Lobby, pk=self.kwargs['lobby_id'])
+    def perform_create(self, serializer):
+        destino = serializer.validated_data["contacto"]
+        if destino.pk == self.jugador.pk:
+            raise ValidationError("No podés agregarte a vos mismo.")
+        if Contacto.objects.filter(
+            Q(jugador=self.jugador, contacto=destino)
+            | Q(jugador=destino, contacto=self.jugador)
+        ).exists():
+            raise ValidationError("Ya existe una solicitud o un contacto con ese jugador.")
+        contacto = serializer.save(jugador=self.jugador)
+        notificar(
+            [contacto.contacto.usuario_id],
+            f"{self.request.user.username} te envió una solicitud de contacto.",
+        )
 
-	def get_context_data(self, **kwargs):
-		context = super().get_context_data(**kwargs)
-		lobby = self.get_lobby()
-		context['lobby'] = lobby
-		context['inscripciones'] = lobby.inscripciones.select_related('jugador').all()
-		context['cupos_disponibles'] = max(
-			Lobby.CANTIDAD_CUPOS - context['inscripciones'].count(),
-			0,
-		)
-		return context
+    def _responder_solicitud(self, estado):
+        contacto = self.get_object()
+        if contacto.contacto_id != self.jugador.pk:
+            raise PermissionDenied("Solo quien recibe la solicitud puede responderla.")
+        cambiado = Contacto.objects.filter(
+            pk=contacto.pk, estado=Contacto.Estado.PENDIENTE
+        ).update(estado=estado)
+        if not cambiado:
+            raise Conflicto("La solicitud ya fue respondida.")
+        contacto.refresh_from_db()
+        accion = "aceptó" if estado == Contacto.Estado.ACEPTADO else "rechazó"
+        notificar(
+            [contacto.jugador.usuario_id],
+            f"{self.request.user.username} {accion} tu solicitud de contacto.",
+        )
+        return Response(self.get_serializer(contacto).data)
 
-	def form_valid(self, form):
-		with transaction.atomic():
-			lobby = get_object_or_404(
-				Lobby.objects.select_for_update(),
-				pk=self.kwargs['lobby_id'],
-			)
+    @action(detail=True, methods=["post"])
+    def aceptar(self, request, pk=None):
+        return self._responder_solicitud(Contacto.Estado.ACEPTADO)
 
-			jugador_invitado = form.cleaned_data['jugador']
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        return self._responder_solicitud(Contacto.Estado.RECHAZADO)
 
-			# Validar que el jugador invitado no esté ya inscripto en el lobby
-			if lobby.inscripciones.filter(jugador=jugador_invitado).exists():
-				form.add_error('jugador', 'Este jugador ya está inscripto en el lobby.')
-				return self.form_invalid(form)
 
-			# Validar que no exista invitación pendiente
-			if Invitacion.objects.filter(
-				lobby=lobby,
-				jugador=jugador_invitado,
-				estado=Invitacion.Estado.PENDIENTE,
-			).exists():
-				form.add_error('jugador', 'Ya existe una invitación pendiente para este jugador.')
-				return self.form_invalid(form)
+class InvitacionViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    _JugadorViewSet,
+):
+    serializer_class = InvitacionSerializer
+    filterset_fields = ["lobby", "estado"]
 
-			# Crear la invitación
-			invitacion = form.save(commit=False)
-			invitacion.lobby = lobby
-			invitacion.jugador = jugador_invitado
-			invitacion.emisor = getattr(self.request.user, 'jugador', None)
-			invitacion.estado = Invitacion.Estado.PENDIENTE
-			invitacion.save()
+    def get_queryset(self):
+        qs = Invitacion.objects.select_related("emisor__usuario", "receptor__usuario", "lobby")
+        qs = qs.filter(Q(emisor=self.jugador) | Q(receptor=self.jugador))
+        rol = self.request.query_params.get("rol")
+        if rol == "enviadas":
+            qs = qs.filter(emisor=self.jugador)
+        elif rol == "recibidas":
+            qs = qs.filter(receptor=self.jugador)
+        return qs
 
-		messages.success(
-			self.request,
-			f'Invitación enviada a {jugador_invitado.usuario.email} correctamente.'
-		)
-		return redirect('partidas:lobby_detail', pk=lobby.pk)
+    def perform_create(self, serializer):
+        receptor = serializer.validated_data["receptor"]
+        lobby = serializer.validated_data["lobby"]
+        es_contacto = Contacto.objects.filter(
+            estado=Contacto.Estado.ACEPTADO
+        ).filter(
+            Q(jugador=self.jugador, contacto=receptor)
+            | Q(jugador=receptor, contacto=self.jugador)
+        ).exists()
+        if not es_contacto:
+            raise Conflicto("Solo podés invitar a jugadores de tu lista de contactos.")
+        if lobby.inscripciones.count() >= Lobby.CANTIDAD_CUPOS:
+            raise Conflicto("El partido ya está completo.")
+        invitacion = serializer.save(emisor=self.jugador)
+        notificar(
+            [receptor.usuario_id],
+            f"{self.request.user.username} te invitó a una partida.",
+        )
+        return invitacion
 
-	def get_success_url(self):
-		return reverse_lazy('partidas:lobby_detail', kwargs={'pk': self.kwargs['lobby_id']})
+    def _como_receptor(self):
+        invitacion = self.get_object()
+        if invitacion.receptor_id != self.jugador.pk:
+            raise PermissionDenied("Solo quien recibió la invitación puede responderla.")
+        return invitacion
+
+    @action(detail=True, methods=["post"])
+    def aceptar(self, request, pk=None):
+        invitacion = self._como_receptor()
+        try:
+            with transaction.atomic():
+                invitacion.aceptar()
+        except Conflicto:
+            Invitacion.objects.filter(
+                pk=invitacion.pk, estado=Invitacion.Estado.PENDIENTE
+            ).update(estado=Invitacion.Estado.EXPIRADA)
+            raise
+        notificar(
+            [invitacion.emisor.usuario_id],
+            f"{request.user.username} aceptó tu invitación.",
+        )
+        invitacion.refresh_from_db()
+        return Response(self.get_serializer(invitacion).data)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        invitacion = self._como_receptor()
+        try:
+            invitacion.rechazar()
+        except ValueError as e:
+            raise Conflicto(str(e))
+        notificar(
+            [invitacion.emisor.usuario_id],
+            f"{request.user.username} rechazó tu invitación.",
+        )
+        return Response(self.get_serializer(invitacion).data)
+
+
+class SolicitudAccesoViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    _JugadorViewSet,
+):
+    serializer_class = SolicitudAccesoSerializer
+    filterset_fields = ["lobby", "estado"]
+
+    def get_queryset(self):
+        return SolicitudAcceso.objects.select_related(
+            "jugador__usuario", "lobby"
+        ).filter(Q(jugador=self.jugador) | Q(lobby__capitan=self.jugador))
+
+    def _como_capitan(self):
+        solicitud = self.get_object()
+        if solicitud.lobby.capitan_id != self.jugador.pk:
+            raise PermissionDenied("Solo el capitán puede responder la solicitud.")
+        return solicitud
+
+    @action(detail=True, methods=["post"])
+    def aceptar(self, request, pk=None):
+        solicitud = self._como_capitan()
+        try:
+            with transaction.atomic():
+                solicitud.aceptar()
+        except Conflicto:
+            SolicitudAcceso.objects.filter(
+                pk=solicitud.pk, estado=SolicitudAcceso.Estado.PENDIENTE
+            ).update(estado=SolicitudAcceso.Estado.EXPIRADA)
+            raise
+        notificar([solicitud.jugador.usuario_id], "Tu solicitud fue aceptada: ya sos parte de la partida.")
+        solicitud.refresh_from_db()
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        solicitud = self._como_capitan()
+        try:
+            solicitud.rechazar()
+        except ValueError as e:
+            raise Conflicto(str(e))
+        notificar([solicitud.jugador.usuario_id], "El capitán rechazó tu solicitud de acceso.")
+        return Response(self.get_serializer(solicitud).data)
+
+
+class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = NotificacionSerializer
+    filterset_fields = ["leida"]
+
+    def get_queryset(self):
+        return Notificacion.objects.filter(usuario=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def marcar_leida(self, request, pk=None):
+        notificacion = self.get_object()
+        Notificacion.objects.filter(pk=notificacion.pk).update(leida=True)
+        notificacion.leida = True
+        return Response(self.get_serializer(notificacion).data)
+
+    @action(detail=False, methods=["post"])
+    def marcar_todas_leidas(self, request):
+        marcadas = self.get_queryset().filter(leida=False).update(leida=True)
+        return Response({"marcadas": marcadas})

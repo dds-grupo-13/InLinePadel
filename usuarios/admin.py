@@ -1,7 +1,7 @@
 from django.contrib import admin
-from . import models
+from django.contrib.auth.admin import UserAdmin
 
-admin.site.register(models.Usuario)
-admin.site.register(models.AdminSistema)
-admin.site.register(models.AdminClub)
-admin.site.register(models.Jugador)
+from .models import Jugador, Usuario
+
+admin.site.register(Usuario, UserAdmin)
+admin.site.register(Jugador)

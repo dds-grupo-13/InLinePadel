@@ -1,305 +1,219 @@
-from django.test import TestCase
-from django.urls import reverse
-from django.core.management import call_command
-
-from clubes.models import Cancha, Club, Turno
-from partidas.models import Inscripcion, Lobby, Reserva
-from social.models import Invitacion, SolicitudAcceso
-
-from .models import Jugador, Usuario
+from config.test_utils import BaseAPITestCase
 
 
-class JugadorUpdateViewTests(TestCase):
-	def setUp(self):
-		self.user = Usuario.objects.create_user(email='jugador@example.com', password='secret123')
+class UsuariosAPITests(BaseAPITestCase):
+    def login_jwt(self, username="ana", password="clave12345"):
+        r = self.client.post(
+            "/api/usuarios/auth/login/", {"username": username, "password": password}
+        )
+        if r.status_code == 200:
+            self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.data['access']}")
+        return r
 
-	def test_usuario_no_autenticado_redirige_a_login(self):
-		"""Un usuario no autenticado es redirigido a la página de login."""
-		response = self.client.get(reverse('usuarios:editar_perfil'))
-		self.assertEqual(response.status_code, 302)
-		self.assertIn('/login/', response.url)
+    def test_registro_login_y_perfil(self):
+        r = self.client.post(
+            "/api/usuarios/jugadores/",
+            {
+                "usuario": {"username": "ana", "email": "ana@x.com", "password": "clave12345"},
+                "posicion": "DRIVE",
+                "zona": self.zona.pk,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertNotIn("password", r.data["usuario"])
 
-	def test_usuario_autenticado_puede_acceder_al_formulario(self):
-		"""Un usuario autenticado puede acceder al formulario de edición de perfil."""
-		self.client.force_login(self.user)
-		response = self.client.get(reverse('usuarios:editar_perfil'))
-		self.assertEqual(response.status_code, 200)
-		self.assertTemplateUsed(response, 'usuarios/perfil_form.html')
+        r = self.login_jwt()
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("access", r.data)
+        self.assertIn("refresh", r.data)
+        self.assertEqual(r.data["usuario"]["username"], "ana")
+        r = self.client.get("/api/usuarios/jugadores/me/")
+        self.assertEqual(r.data["jugador"]["posicion"], "DRIVE")
 
-	def test_se_crea_perfil_automaticamente_si_no_existe(self):
-		"""El perfil de Jugador se crea automáticamente si no existe."""
-		self.assertFalse(Jugador.objects.filter(usuario=self.user).exists())
+    def test_password_corta_se_rechaza(self):
+        r = self.client.post(
+            "/api/usuarios/jugadores/",
+            {"usuario": {"username": "x", "email": "x@x.com", "password": "123"}},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
 
-		self.client.force_login(self.user)
-		response = self.client.get(reverse('usuarios:editar_perfil'))
+    def test_login_incorrecto_y_throttling(self):
+        for _ in range(10):
+            r = self.client.post("/api/usuarios/auth/login/", {"username": "n", "password": "m"})
+            self.assertEqual(r.status_code, 400)
+        r = self.client.post("/api/usuarios/auth/login/", {"username": "n", "password": "m"})
+        self.assertEqual(r.status_code, 429)
 
-		self.assertEqual(response.status_code, 200)
-		self.assertTrue(Jugador.objects.filter(usuario=self.user).exists())
+    def test_no_puede_modificar_perfil_ajeno(self):
+        a, b = self.jugador("a"), self.jugador("b")
+        self.login(a.usuario)
+        r = self.client.patch(f"/api/usuarios/jugadores/{b.pk}/", {"posicion": "REVES"}, format="json")
+        self.assertEqual(r.status_code, 403)
 
-	def test_usuario_puede_actualizar_su_perfil(self):
-		"""Un usuario puede actualizar su información de jugador."""
-		# Crear perfil inicial
-		jugador = Jugador.objects.create(
-			usuario=self.user,
-			nombre='Juan',
-			apellido='Pérez',
-			zona='Centro',
-		)
+    def test_endpoints_exigen_autenticacion(self):
+        self.assertEqual(self.client.get("/api/partidas/lobbies/").status_code, 401)
+        self.assertEqual(self.client.get("/api/clubes/turnos/").status_code, 401)
 
-		self.client.force_login(self.user)
+    def registrar(self, usuario):
+        r = self.client.post(
+            "/api/usuarios/jugadores/", {"usuario": usuario, "posicion": "DRIVE"}, format="json"
+        )
+        return r
 
-		response = self.client.post(
-			reverse('usuarios:editar_perfil'),
-			{
-				'nombre': 'Carlos',
-				'apellido': 'García',
-				'zona': 'Norte',
-				'posicion_preferida': 'DRIVE',
-			},
-			follow=True,
-		)
+    def test_password_debil_se_rechaza(self):
+        for clave in ("12345678", "password"):
+            r = self.registrar({"username": "ana", "email": "ana@x.com", "password": clave})
+            self.assertEqual(r.status_code, 400, clave)
+            self.assertIn("password", r.data["usuario"])
 
-		self.assertEqual(response.status_code, 200)
+    def test_email_duplicado_sin_importar_mayusculas(self):
+        self.assertEqual(
+            self.registrar({"username": "u1", "email": "u@x.com", "password": "clave12345"}).status_code, 201
+        )
+        r = self.registrar({"username": "u2", "email": "U@X.com", "password": "clave12345"})
+        self.assertEqual(r.status_code, 400)
 
-		jugador.refresh_from_db()
-		self.assertEqual(jugador.nombre, 'Carlos')
-		self.assertEqual(jugador.apellido, 'García')
-		self.assertEqual(jugador.zona, 'Norte')
-		self.assertEqual(jugador.posicion_preferida, 'DRIVE')
+    def test_patch_me_con_mismos_username_y_email(self):
+        j = self.jugador("ana")
+        self.login(j.usuario)
+        r = self.client.patch(
+            "/api/usuarios/jugadores/me/",
+            {"usuario": {"username": "ana", "email": "ana@x.com", "first_name": "Ana"}},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        j.usuario.refresh_from_db()
+        self.assertEqual(j.usuario.first_name, "Ana")
 
-	def test_bola_prevention_usuario_solo_puede_editar_su_perfil(self):
-		"""Cada usuario solo puede editar su propio perfil (BOLA prevention)."""
-		otro_user = Usuario.objects.create_user(email='otro@example.com', password='secret123')
-		otro_jugador = Jugador.objects.create(
-			usuario=otro_user,
-			nombre='Otro',
-			apellido='Jugador',
-			zona='Sur',
-		)
+    def test_patch_me_no_pisa_username_de_otro(self):
+        self.jugador("otro")
+        self.login(self.jugador("ana").usuario)
+        r = self.client.patch(
+            "/api/usuarios/jugadores/me/", {"usuario": {"username": "otro"}}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
 
-		self.client.force_login(self.user)
+    def test_cambio_de_password_pide_la_actual_y_mantiene_el_acceso(self):
+        self.jugador("ana")
+        self.login_jwt()
+        url = "/api/usuarios/jugadores/me/"
+        r = self.client.patch(url, {"usuario": {"password": "otraclave987"}}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.client.patch(
+            url, {"usuario": {"password": "otraclave987", "password_actual": "incorrecta"}}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        r = self.client.patch(
+            url, {"usuario": {"password": "12345678", "password_actual": "clave12345"}}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        r = self.client.patch(
+            url, {"usuario": {"password": "otraclave987", "password_actual": "clave12345"}}, format="json"
+        )
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.client.credentials()
+        r = self.login_jwt(password="otraclave987")
+        self.assertEqual(r.status_code, 200)
 
-		# Intentar acceder como este usuario solo recuperará su propio perfil
-		response = self.client.get(reverse('usuarios:editar_perfil'))
-		self.assertEqual(response.status_code, 200)
+    def test_dar_de_baja_libera_partidas_y_cupos(self):
+        from partidas.models import Lobby
+        from social.models import SolicitudAcceso
 
-		# La instancia obtenida debe ser la del usuario autenticado, no la de otro_user
-		form = response.context['form']
-		self.assertEqual(form.instance.usuario, self.user)
+        cap, otro = self.jugador("cap"), self.jugador("otro")
+        t = self.turno(self.cancha)
+        solo = self.turno(self.cancha, hora=10)
+        self.login(cap.usuario)
+        con_otro = self.client.post("/api/partidas/lobbies/", {"turno": t.pk}, format="json").data["id"]
+        self.client.post("/api/partidas/lobbies/", {"turno": solo.pk}, format="json")
+        self.login(otro.usuario)
+        self.client.post(f"/api/partidas/lobbies/{con_otro}/unirse/")
 
-	def test_campos_requeridos_no_pueden_estar_vacios(self):
-		"""Los campos requeridos no pueden quedar vacíos."""
-		jugador = Jugador.objects.create(
-			usuario=self.user,
-			nombre='Juan',
-			apellido='Pérez',
-			zona='Centro',
-		)
+        self.login(cap.usuario)
+        self.assertEqual(self.client.delete(f"/api/usuarios/jugadores/{cap.pk}/").status_code, 204)
+        cap.usuario.refresh_from_db()
+        self.assertFalse(cap.usuario.is_active)
+        self.assertEqual(Lobby.objects.get(pk=con_otro).capitan_id, otro.pk)
+        self.assertEqual(Lobby.objects.get(turno=solo).estado, "CANCELADO")
+        self.assertFalse(Lobby.objects.get(pk=con_otro).inscripciones.filter(jugador=cap).exists())
+        self.assertEqual(SolicitudAcceso.objects.count(), 0)
 
-		self.client.force_login(self.user)
 
-		response = self.client.post(
-			reverse('usuarios:editar_perfil'),
-			{
-				'nombre': '',
-				'apellido': 'García',
-				'zona': 'Norte',
-				'posicion_preferida': 'DRIVE',
-			},
-		)
+class JWTTests(BaseAPITestCase):
+    ME = "/api/usuarios/jugadores/me/"
 
-		# El formulario debe tener errores
-		self.assertEqual(response.status_code, 200)
-		self.assertIn('nombre', response.context['form'].errors)
-
-class DemoDataTests(TestCase):
     def setUp(self):
         super().setUp()
-        self.user = Usuario.objects.create_user(email='jugador@example.com', password='secret123')
-        self.jugador = Jugador.objects.create(
-            usuario=self.user,
-            nombre='Juan',
-            apellido='Perez',
-            zona='Centro',
-        )
+        self.jugador("ana")
+        self.tokens = self.client.post(
+            "/api/usuarios/auth/login/", {"username": "ana", "password": "clave12345"}
+        ).data
 
-    def test_seed_demo_data_creates_demo_content(self):
-        call_command('seed_demo_data')
+    def bearer(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
-        self.assertTrue(Usuario.objects.filter(email='demo@inlinepadel.com').exists())
-        self.assertTrue(Club.objects.exists())
-        self.assertTrue(Cancha.objects.exists())
-        self.assertTrue(Turno.objects.exists())
-        self.assertTrue(Lobby.objects.exists())
-        self.assertTrue(Reserva.objects.exists())
-        self.assertTrue(Inscripcion.objects.exists())
-        self.assertTrue(Invitacion.objects.exists())
-        self.assertTrue(SolicitudAcceso.objects.exists())
+    def test_protegido_sin_token_token_valido_y_falso(self):
+        self.assertEqual(self.client.get(self.ME).status_code, 401)
+        self.bearer(self.tokens["access"])
+        self.assertEqual(self.client.get(self.ME).status_code, 200)
+        self.bearer("token.falso.x")
+        self.assertEqual(self.client.get(self.ME).status_code, 401)
 
-    def test_demo_login_autentica_al_usuario_demo(self):
-        call_command('seed_demo_data')
+    def test_access_vencido_da_401(self):
+        from datetime import timedelta
 
-        response = self.client.post(
-            reverse('login'),
-            {'email': 'demo@inlinepadel.com', 'password': 'demo123'},
-            follow=True,
-        )
+        from rest_framework_simplejwt.tokens import AccessToken
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue('_auth_user_id' in self.client.session)
-        self.assertEqual(
-            int(self.client.session['_auth_user_id']),
-            Usuario.objects.get(email='demo@inlinepadel.com').pk,
-        )
+        token = AccessToken(self.tokens["access"])
+        token.set_exp(lifetime=-timedelta(seconds=1))
+        self.bearer(str(token))
+        self.assertEqual(self.client.get(self.ME).status_code, 401)
 
-    def test_demo_login_acepta_password_legacy_de_demo(self):
-        call_command('seed_demo_data')
+    def test_login_no_crea_sesion(self):
+        self.assertNotIn("sessionid", self.client.cookies)
 
-        response = self.client.post(
-            reverse('login'),
-            {'email': 'demo@inlinepadel.com', 'password': 'demo'},
-            follow=True,
-        )
+    def test_refresh_rota_y_el_viejo_queda_invalido(self):
+        url = "/api/usuarios/auth/refresh/"
+        r = self.client.post(url, {"refresh": self.tokens["refresh"]})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIn("access", r.data)
+        self.assertIn("refresh", r.data)
+        r = self.client.post(url, {"refresh": self.tokens["refresh"]})
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(self.client.post(url, {"refresh": "falso"}).status_code, 401)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue('_auth_user_id' in self.client.session)
-        self.assertEqual(
-            int(self.client.session['_auth_user_id']),
-            Usuario.objects.get(email='demo@inlinepadel.com').pk,
-        )
+    def test_logout_invalida_el_refresh(self):
+        self.bearer(self.tokens["access"])
+        r = self.client.post("/api/usuarios/auth/logout/", {"refresh": self.tokens["refresh"]})
+        self.assertEqual(r.status_code, 204)
+        self.client.credentials()
+        r = self.client.post("/api/usuarios/auth/refresh/", {"refresh": self.tokens["refresh"]})
+        self.assertEqual(r.status_code, 401)
 
-    def test_se_crea_contacto_al_agregar_desde_perfil(self):
-        import social.models
-        otro_user = Usuario.objects.create_user(
-            email='amigo@example.com',
-            password='secret123',
-        )
-        otro_jugador = Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Ana',
-            apellido='Gomez',
-            zona='Belgrano',
-        )
-        self.client.force_login(self.user)
-        response = self.client.post(
-            reverse('usuarios:perfil_agregar_contacto'),
-            {'amigo_id': str(otro_jugador.pk)},
-            follow=True,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            social.models.Contacto.objects.filter(
-                jugador=self.jugador,
-                contacto=otro_jugador,
-                estado=social.models.Contacto.Estado.ACEPTADO,
-            ).exists()
-        )
+    def test_logout_exige_token_y_refresh_valido(self):
+        url = "/api/usuarios/auth/logout/"
+        self.assertEqual(self.client.post(url, {"refresh": self.tokens["refresh"]}).status_code, 401)
+        self.bearer(self.tokens["access"])
+        self.assertEqual(self.client.post(url).status_code, 400)
+        self.assertEqual(self.client.post(url, {"refresh": "falso"}).status_code, 400)
 
-    def test_perfil_muestra_contactos_iniciados_y_recibidos(self):
-        import social.models
-        otro_user = Usuario.objects.create_user(
-            email='amigo@example.com',
-            password='secret123',
-        )
-        otro_jugador = Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Ana',
-            apellido='Gomez',
-            zona='Belgrano',
-        )
-        social.models.Contacto.objects.create(
-            jugador=self.jugador,
-            contacto=otro_jugador,
-            estado=social.models.Contacto.Estado.ACEPTADO,
-        )
-        self.client.force_login(self.user)
-        response = self.client.get(reverse('usuarios:perfil'))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['contactos_iniciados'].count(), 1)
-        self.assertEqual(response.context['contactos_iniciados'].first().pk, otro_jugador.pk)
-        self.assertEqual(response.context['contactos_recibidos'].count(), 0)
+    def test_baja_invalida_los_refresh(self):
+        self.bearer(self.tokens["access"])
+        self.assertEqual(self.client.delete(f"/api/usuarios/jugadores/{self.client.get(self.ME).data['id']}/").status_code, 204)
+        self.client.credentials()
+        r = self.client.post("/api/usuarios/auth/refresh/", {"refresh": self.tokens["refresh"]})
+        self.assertEqual(r.status_code, 401)
 
-    def test_remover_contacto_elimina_relacion(self):
-        import social.models
-        otro_user = Usuario.objects.create_user(
-            email='amigo@example.com',
-            password='secret123',
-        )
-        otro_jugador = Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Ana',
-            apellido='Gomez',
-            zona='Belgrano',
-        )
-        contacto = social.models.Contacto.objects.create(
-            jugador=self.jugador,
-            contacto=otro_jugador,
-            estado=social.models.Contacto.Estado.ACEPTADO,
-        )
-        self.client.force_login(self.user)
-        response = self.client.post(
-            reverse('usuarios:perfil_remover_contacto'),
-            {'contacto_id': str(otro_jugador.pk)},
-            follow=True,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(social.models.Contacto.objects.filter(pk=contacto.pk).exists())
-        self.assertEqual(response.context['contactos_iniciados'].count(), 0)
-
-    def test_buscar_jugadores_excluye_propio_y_contactos(self):
-        import social.models
-        otro_user = Usuario.objects.create_user(
-            email='amigo@example.com',
-            password='secret123',
-        )
-        otro_jugador = Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Ana',
-            apellido='Gomez',
-            zona='Belgrano',
-        )
-        social.models.Contacto.objects.create(
-            jugador=self.jugador,
-            contacto=otro_jugador,
-            estado=social.models.Contacto.Estado.ACEPTADO,
-        )
-        tercer_user = Usuario.objects.create_user(
-            email='tercero@example.com',
-            password='secret123',
-        )
-        tercer_jugador = Jugador.objects.create(
-            usuario=tercer_user,
-            nombre='Luis',
-            apellido='Ferraro',
-            zona='Caballito',
-        )
-        self.client.force_login(self.user)
-        response = self.client.get(
-            reverse('usuarios:perfil_buscar') + '?q=Fer',
-            follow=True,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Ferraro')
-        self.assertNotContains(response, 'Gomez')
-        self.assertNotContains(response, self.jugador.apellido)
-
-    def test_buscar_jugadores_sin_query_devuelve_disponibles(self):
-        import social.models
-        otro_user = Usuario.objects.create_user(
-            email='amigo@example.com',
-            password='secret123',
-        )
-        Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Ana',
-            apellido='Gomez',
-            zona='Belgrano',
-        )
-        self.client.force_login(self.user)
-        response = self.client.get(
-            reverse('usuarios:perfil_buscar'),
-            follow=True,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Ana')
-
+    def test_cors_preflight(self):
+        url = "/api/clubes/clubes/"
+        pedido = {
+            "HTTP_ACCESS_CONTROL_REQUEST_METHOD": "GET",
+            "HTTP_ACCESS_CONTROL_REQUEST_HEADERS": "authorization,content-type",
+        }
+        r = self.client.options(url, HTTP_ORIGIN="http://localhost:4200", **pedido)
+        self.assertEqual(r["Access-Control-Allow-Origin"], "http://localhost:4200")
+        self.assertIn("authorization", r["Access-Control-Allow-Headers"])
+        r = self.client.options(url, HTTP_ORIGIN="http://malo.com", **pedido)
+        self.assertNotIn("Access-Control-Allow-Origin", r)

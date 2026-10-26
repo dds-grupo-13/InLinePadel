@@ -1,136 +1,88 @@
-from datetime import timedelta
+from config.test_utils import BaseAPITestCase
+from partidas.models import Lobby
+from social.models import Contacto, Invitacion, Notificacion
 
-from django.test import TestCase
-from django.urls import reverse
-from django.utils import timezone
-
-from partidas.models import Inscripcion, Lobby
-from usuarios.models import Jugador, Usuario
-
-from .models import Invitacion
+LOBBIES = "/api/partidas/lobbies/"
 
 
-class InvitacionCreateViewTests(TestCase):
-    def setUp(self):
-        self.capitan_user = Usuario.objects.create_user(email='capitan@example.com', password='secret123')
-        self.capitan = Jugador.objects.create(
-            usuario=self.capitan_user,
-            nombre='Capitán',
-            apellido='Principal',
-            zona='Centro',
-        )
+class SocialAPITests(BaseAPITestCase):
+    def hacer_contactos(self, a, b):
+        Contacto.objects.create(jugador=a, contacto=b, estado="ACEPTADO")
 
-        self.jugador_invitar_user = Usuario.objects.create_user(email='invitar@example.com', password='secret123')
-        self.jugador_invitar = Jugador.objects.create(
-            usuario=self.jugador_invitar_user,
-            nombre='Jugador',
-            apellido='Invitable',
-            zona='Norte',
-        )
+    def lobby_de(self, cap, hora=20):
+        self.login(cap.usuario)
+        return self.client.post(LOBBIES, {"turno": self.turno(self.cancha, hora=hora).pk}, format="json").data["id"]
 
-        self.otro_jugador_user = Usuario.objects.create_user(email='otro@example.com', password='secret123')
-        self.otro_jugador = Jugador.objects.create(
-            usuario=self.otro_jugador_user,
-            nombre='Otro',
-            apellido='Jugador',
-            zona='Sur',
-        )
+    def test_contactos_solicitud_y_respuesta(self):
+        a, b = self.jugador("a"), self.jugador("b")
+        self.login(a.usuario)
+        r = self.client.post("/api/social/contactos/", {"contacto": b.pk})
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(self.client.post("/api/social/contactos/", {"contacto": b.pk}).status_code, 400)
+        self.assertEqual(self.client.post("/api/social/contactos/", {"contacto": a.pk}).status_code, 400)
+        self.assertEqual(self.client.post(f"/api/social/contactos/{r.data['id']}/aceptar/").status_code, 403)
+        self.login(b.usuario)
+        self.assertEqual(self.client.post(f"/api/social/contactos/{r.data['id']}/aceptar/").data["estado"], "ACEPTADO")
+        self.assertTrue(Notificacion.objects.filter(usuario=a.usuario).exists())
 
-        self.lobby = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=1),
-        )
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=self.capitan,
-            numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
-        )
+    def test_cu03_invitar_y_aceptar(self):
+        cap, amigo = self.jugador("cap"), self.jugador("amigo")
+        self.hacer_contactos(cap, amigo)
+        lobby_id = self.lobby_de(cap)
+        r = self.client.post("/api/social/invitaciones/", {"lobby": lobby_id, "receptor": amigo.pk})
+        self.assertEqual(r.status_code, 201, r.data)
+        self.login(amigo.usuario)
+        r2 = self.client.post(f"/api/social/invitaciones/{r.data['id']}/aceptar/")
+        self.assertEqual(r2.status_code, 200, r2.data)
+        self.assertEqual(Lobby.objects.get().inscripciones.count(), 2)
 
-    def test_capitan_puede_enviar_invitacion(self):
-        """El capitán del lobby puede enviar una invitación a un jugador."""
-        self.client.force_login(self.capitan_user)
+    def test_invitar_requiere_contacto_e_inscripcion(self):
+        cap, extraño = self.jugador("cap"), self.jugador("extraño")
+        lobby_id = self.lobby_de(cap)
+        r = self.client.post("/api/social/invitaciones/", {"lobby": lobby_id, "receptor": extraño.pk})
+        self.assertEqual(r.status_code, 409)
 
-        response = self.client.post(
-            reverse('social:crear_invitacion', kwargs={'lobby_id': self.lobby.pk}),
-            {'jugador': self.jugador_invitar.pk},
-            follow=True,
-        )
+    def test_rechazar_invitacion_solo_receptor(self):
+        cap, amigo = self.jugador("cap"), self.jugador("amigo")
+        self.hacer_contactos(cap, amigo)
+        lobby_id = self.lobby_de(cap)
+        inv = self.client.post("/api/social/invitaciones/", {"lobby": lobby_id, "receptor": amigo.pk}).data["id"]
+        self.assertEqual(self.client.post(f"/api/social/invitaciones/{inv}/rechazar/").status_code, 403)
+        self.login(amigo.usuario)
+        self.assertEqual(self.client.post(f"/api/social/invitaciones/{inv}/rechazar/").data["estado"], "RECHAZADA")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            Invitacion.objects.filter(
-                lobby=self.lobby,
-                jugador=self.jugador_invitar,
-                estado=Invitacion.Estado.PENDIENTE,
-            ).exists()
-        )
+    def test_aceptar_sin_cupos_expira_la_invitacion(self):
+        cap, amigo = self.jugador("cap"), self.jugador("amigo")
+        self.hacer_contactos(cap, amigo)
+        lobby_id = self.lobby_de(cap)
+        inv = self.client.post("/api/social/invitaciones/", {"lobby": lobby_id, "receptor": amigo.pk}).data["id"]
+        for n in ("j2", "j3", "j4"):
+            self.login(self.jugador(n).usuario)
+            self.client.post(f"{LOBBIES}{lobby_id}/unirse/")
+        self.assertEqual(Invitacion.objects.get(pk=inv).estado, "EXPIRADA")
+        self.login(amigo.usuario)
+        self.assertEqual(self.client.post(f"/api/social/invitaciones/{inv}/aceptar/").status_code, 409)
 
-    def test_no_capitan_no_puede_enviar_invitacion(self):
-        """Un jugador que no es capitán no puede enviar invitaciones."""
-        self.client.force_login(self.jugador_invitar_user)
+    def test_privada_solo_por_invitacion_no_se_puede_solicitar(self):
+        cap, visita = self.jugador("cap"), self.jugador("visita")
+        self.login(cap.usuario)
+        lobby_id = self.client.post(
+            LOBBIES, {"turno": self.turno(self.cancha).pk, "privacidad": "PRIVADO"}, format="json"
+        ).data["id"]
 
-        response = self.client.post(
-            reverse('social:crear_invitacion', kwargs={'lobby_id': self.lobby.pk}),
-            {'jugador': self.otro_jugador.pk},
-        )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(
-            Invitacion.objects.filter(
-                lobby=self.lobby,
-                jugador=self.otro_jugador,
-            ).exists()
-        )
-
-    def test_no_puede_invitar_jugador_ya_inscripto(self):
-        """No se puede invitar a un jugador que ya está inscripto en el lobby."""
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=self.jugador_invitar,
-            numero_cupo=2,
-            rol=Inscripcion.Rol.JUGADOR,
-        )
-
-        self.client.force_login(self.capitan_user)
-
-        response = self.client.post(
-            reverse('social:crear_invitacion', kwargs={'lobby_id': self.lobby.pk}),
-            {'jugador': self.jugador_invitar.pk},
-        )
-
-        # Valida que haya un error y que no se haya creado otra invitación
-        self.assertEqual(response.status_code, 200)
+        self.login(visita.usuario)
+        self.assertEqual(self.client.post(f"{LOBBIES}{lobby_id}/unirse/").status_code, 404)
         self.assertEqual(
-            Invitacion.objects.filter(
-                lobby=self.lobby,
-                jugador=self.jugador_invitar,
-            ).count(),
-            0,
+            self.client.post("/api/social/solicitudes/", {"lobby": lobby_id}).status_code,
+            405,
         )
+        self.assertEqual(Lobby.objects.get().inscripciones.count(), 1)
 
-    def test_no_puede_invitar_con_invitacion_pendiente(self):
-        """No se puede invitar a un jugador que ya tiene una invitación pendiente."""
-        Invitacion.objects.create(
-            lobby=self.lobby,
-            jugador=self.jugador_invitar,
-            emisor=self.capitan,
-            estado=Invitacion.Estado.PENDIENTE,
-        )
-
-        self.client.force_login(self.capitan_user)
-
-        response = self.client.post(
-            reverse('social:crear_invitacion', kwargs={'lobby_id': self.lobby.pk}),
-            {'jugador': self.jugador_invitar.pk},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            Invitacion.objects.filter(
-                lobby=self.lobby,
-                jugador=self.jugador_invitar,
-                estado=Invitacion.Estado.PENDIENTE,
-            ).count(),
-            1,
-        )
+    def test_notificaciones_propias_y_marcar_leidas(self):
+        a, b = self.jugador("a"), self.jugador("b")
+        Notificacion.objects.create(usuario=a.usuario, mensaje="hola")
+        Notificacion.objects.create(usuario=b.usuario, mensaje="ajena")
+        self.login(a.usuario)
+        r = self.client.get("/api/social/notificaciones/")
+        self.assertEqual(r.data["count"], 1)
+        self.assertEqual(self.client.post("/api/social/notificaciones/marcar_todas_leidas/").data["marcadas"], 1)

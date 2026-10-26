@@ -1,10 +1,11 @@
-from django.urls import path
-from . import views
+from rest_framework.routers import DefaultRouter
 
-app_name = 'clubes'
+from .views import CanchaViewSet, ClubViewSet, TurnoViewSet, ZonaViewSet
 
-urlpatterns = [
-    path('', views.ClubListView.as_view(), name='club_list'),
-    path('<int:club_id>/canchas/', views.CanchaListView.as_view(), name='cancha_list'),
-    path('canchas/<int:cancha_id>/', views.CanchaDetailView.as_view(), name='cancha_detail'),
-]
+router = DefaultRouter()
+router.register("zonas", ZonaViewSet, basename="zona")
+router.register("clubes", ClubViewSet, basename="club")
+router.register("canchas", CanchaViewSet, basename="cancha")
+router.register("turnos", TurnoViewSet, basename="turno")
+
+urlpatterns = router.urls

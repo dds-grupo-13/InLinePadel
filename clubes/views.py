@@ -1,86 +1,193 @@
-from django.shortcuts import get_object_or_404
-from django.db.models import Count
+from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
-from django.views.generic import ListView
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 
-from .models import Cancha, Club
+from config.exceptions import Conflicto
+from config.permissions import EsAdminClub, EsAdminSistema, SoloLecturaOAdminSistema
 from partidas.models import Lobby
 
-
-class ClubListView(ListView):
-	model = Club
-	template_name = 'clubes/club_list.html'
-	context_object_name = 'clubs'
-
-	def get_queryset(self):
-		clubs = list(Club.objects.filter(estado=Club.Estado.ACTIVO).prefetch_related('canchas').order_by('denominacion'))
-		open_lobbies = (
-			Lobby.objects
-			.filter(estado=Lobby.Estado.EN_FORMACION, reserva__isnull=False)
-			.annotate(cupos_ocupados=Count('inscripciones'))
-			.filter(cupos_ocupados__lt=Lobby.CANTIDAD_CUPOS)
-			.select_related('reserva__turno__cancha__club')
-		)
-
-		lobbies_por_club = {}
-		for lobby in open_lobbies:
-			club = lobby.reserva.turno.cancha.club
-			lobbies_por_club[club.pk] = lobbies_por_club.get(club.pk, 0) + 1
-
-		for club in clubs:
-			club.canchas_disponibles = club.canchas.exists()
-			club.lobbies_abiertos = lobbies_por_club.get(club.pk, 0)
-
-		return clubs
+from .filters import TurnoFilter
+from .models import Cancha, Club, Turno, Zona
+from .serializers import (
+    CanchaSerializer,
+    ClubSerializer,
+    TurnoOcupacionSerializer,
+    TurnoSerializer,
+    ZonaSerializer,
+)
 
 
-class CanchaListView(ListView):
-	model = Cancha
-	template_name = 'clubes/cancha_list.html'
-
-	def get_queryset(self):
-		return self.model.objects.filter(club_id=self.kwargs['club_id'])
-
-	def get_context_data(self, **kwargs):
-		context = super().get_context_data(**kwargs)
-		context['club'] = get_object_or_404(Club, pk=self.kwargs['club_id'])
-		return context
+class ZonaViewSet(viewsets.ModelViewSet):
+    queryset = Zona.objects.all().order_by("nombre")
+    serializer_class = ZonaSerializer
+    permission_classes = [SoloLecturaOAdminSistema]
+    pagination_class = None
 
 
-class CanchaDetailView(ListView):
-	model = Lobby
-	template_name = 'clubes/cancha_detail.html'
-	context_object_name = 'lobbies_activos'
+class ClubViewSet(viewsets.ModelViewSet):
+    serializer_class = ClubSerializer
+    filterset_fields = ["zona", "estado"]
 
-	def get_cancha(self):
-		return get_object_or_404(Cancha.objects.select_related('club'), pk=self.kwargs['cancha_id'])
+    def get_permissions(self):
+        if self.action == "ocupacion":
+            return [EsAdminClub()]
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated()]
+        return [EsAdminSistema()]
 
-	def get_queryset(self):
-		cancha = self.get_cancha()
-		fecha_actual = timezone.now().date()
-		return (
-			Lobby.objects
-			.filter(
-				estado=Lobby.Estado.EN_FORMACION,
-				reserva__turno__cancha=cancha,
-				reserva__turno__fecha__gte=fecha_actual,
-			)
-			.annotate(cupos_ocupados=Count('inscripciones'))
-			.filter(cupos_ocupados__lt=Lobby.CANTIDAD_CUPOS)
-			.select_related('reserva__turno')
-			.prefetch_related('inscripciones')
-			.order_by('reserva__turno__fecha', 'reserva__turno__hora_inicio')
-		)
+    def get_queryset(self):
+        qs = Club.objects.select_related("zona").order_by("denominacion")
+        user = self.request.user
+        if user.is_superuser:
+            return qs
+        if user.is_staff:
+            return qs.filter(admin=user)
+        return qs.filter(estado=Club.Estado.ACTIVO)
 
-	def get_context_data(self, **kwargs):
-		context = super().get_context_data(**kwargs)
-		cancha = self.get_cancha()
-		fecha_actual = timezone.now().date()
-		turnos = cancha.turnos.filter(
-			estado='LIBRE',
-			fecha__gte=fecha_actual,
-		).order_by('fecha', 'hora_inicio')
-		context['cancha'] = cancha
-		context['club'] = cancha.club
-		context['turnos'] = turnos
-		return context
+    def _cambiar_estado(self, estado):
+        club = self.get_object()
+        club.estado = estado
+        club.save(update_fields=["estado"])
+        return Response(self.get_serializer(club).data)
+
+    @action(detail=True, methods=["post"])
+    def suspender(self, request, pk=None):
+        return self._cambiar_estado(Club.Estado.SUSPENDIDO)
+
+    @action(detail=True, methods=["post"])
+    def reactivar(self, request, pk=None):
+        return self._cambiar_estado(Club.Estado.ACTIVO)
+
+    @action(detail=True, methods=["post"])
+    def dar_de_baja(self, request, pk=None):
+        return self._cambiar_estado(Club.Estado.BAJA)
+
+    def perform_destroy(self, instance):
+        instance.estado = Club.Estado.BAJA
+        instance.save(update_fields=["estado"])
+
+    @action(detail=True, methods=["get"])
+    def ocupacion(self, request, pk=None):
+        club = self.get_object()
+        turnos = (
+            Turno.objects.con_cancha()
+            .filter(cancha__club=club)
+            .prefetch_related(
+                Prefetch(
+                    "lobbies",
+                    queryset=Lobby.objects.prefetch_related("inscripciones"),
+                )
+            )
+        )
+        turnos = TurnoFilter(request.query_params, queryset=turnos, request=request).qs
+        pagina = self.paginate_queryset(turnos)
+        serializer = TurnoOcupacionSerializer(pagina, many=True)
+        return self.get_paginated_response(serializer.data)
+
+
+class CanchaViewSet(viewsets.ModelViewSet):
+    serializer_class = CanchaSerializer
+    filterset_fields = ["club", "tipo", "activa"]
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAuthenticated()]
+        return [EsAdminClub()]
+
+    def get_queryset(self):
+        qs = Cancha.objects.con_club().order_by("club", "numero")
+        user = self.request.user
+        if user.is_superuser:
+            return qs
+        if user.is_staff:
+            return qs.filter(club__admin=user)
+        return qs.filter(activa=True, club__estado=Club.Estado.ACTIVO)
+
+    def perform_destroy(self, instance):
+        if instance.turnos.exists():
+            instance.activa = False
+            instance.save(update_fields=["activa"])
+        else:
+            instance.delete()
+
+
+class TurnoViewSet(viewsets.ModelViewSet):
+    serializer_class = TurnoSerializer
+    filterset_class = TurnoFilter
+    EDITABLES = (Turno.Estado.LIBRE, Turno.Estado.NO_DISPONIBLE)
+    MAX_TURNOS_MASIVO = 500
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAuthenticated()]
+        return [EsAdminClub()]
+
+    def get_queryset(self):
+        qs = Turno.objects.con_cancha()
+        user = self.request.user
+        if user.is_superuser:
+            return qs
+        if user.is_staff:
+            return qs.filter(cancha__club__admin=user)
+        return qs.filter(
+            estado=Turno.Estado.LIBRE,
+            cancha__activa=True,
+            cancha__club__estado=Club.Estado.ACTIVO,
+            inicio__gt=timezone.now(),
+        )
+
+    def _verificar_editable(self, turno):
+        if turno.estado not in self.EDITABLES:
+            raise Conflicto("El turno ya fue tomado por una partida y no puede modificarse.")
+
+    def perform_update(self, serializer):
+        self._verificar_editable(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._verificar_editable(instance)
+        if instance.lobbies.exists():
+            raise Conflicto("El turno tiene historial de partidas y no puede eliminarse.")
+        instance.delete()
+
+    def _transicion(self, origen, destino, mensaje):
+        turno = self.get_object()
+        cambiado = Turno.objects.filter(pk=turno.pk, estado=origen).update(estado=destino)
+        if not cambiado:
+            raise Conflicto(mensaje)
+        turno.refresh_from_db()
+        return Response(self.get_serializer(turno).data)
+
+    @action(detail=True, methods=["post"])
+    def no_disponible(self, request, pk=None):
+        return self._transicion(
+            Turno.Estado.LIBRE,
+            Turno.Estado.NO_DISPONIBLE,
+            "Solo se puede retirar un turno libre: este ya fue tomado o ya está retirado.",
+        )
+
+    @action(detail=True, methods=["post"])
+    def disponible(self, request, pk=None):
+        return self._transicion(
+            Turno.Estado.NO_DISPONIBLE,
+            Turno.Estado.LIBRE,
+            "Solo se puede volver a publicar un turno marcado como no disponible.",
+        )
+
+    @action(detail=False, methods=["post"])
+    def crear_masivo(self, request):
+        if isinstance(request.data, list) and len(request.data) > self.MAX_TURNOS_MASIVO:
+            raise ValidationError(
+                f"Se pueden crear hasta {self.MAX_TURNOS_MASIVO} turnos por pedido."
+            )
+        serializer = self.get_serializer(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+        turnos = [Turno(**datos) for datos in serializer.validated_data]
+        with transaction.atomic():
+            creados = Turno.objects.crear_masivo(turnos)
+        return Response(self.get_serializer(creados, many=True).data, status=status.HTTP_201_CREATED)

@@ -1,0 +1,2280 @@
+{
+  "info": {
+    "name": "InLinePadel API",
+    "description": "API REST de InLinePadel. Autenticación por sesión (cookie): ejecutá Auth > Login primero. Las peticiones POST/PATCH/DELETE envían X-CSRFToken automáticamente desde la cookie csrftoken.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (jugador)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "JWT: guarda access/refresh en variables de colección. Límite: 10 intentos cada 15 min por IP.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (admin de club)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "JWT: guarda access/refresh en variables de colección. Límite: 10 intentos cada 15 min por IP."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/auth/refresh/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "auth",
+                "refresh",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Rota el refresh: devuelve nuevo access y refresh.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access', j.access);",
+                  "  pm.collectionVariables.set('refresh', j.refresh);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/auth/logout/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "auth",
+                "logout",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Blacklistea el refresh token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jugadores",
+      "item": [
+        {
+          "name": "Registro (público)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": {\n    \"username\": \"jugador1\",\n    \"email\": \"jugador1@example.com\",\n    \"first_name\": \"Juan\",\n    \"last_name\": \"Pérez\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{zona_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Buscar jugadores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "juan",
+                  "disabled": true
+                },
+                {
+                  "key": "zona",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "posicion",
+                  "value": "DRIVE",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Detalle jugador",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/{{jugador_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "{{jugador_id}}",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mi perfil",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "me",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Editar mi perfil",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "me",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"posicion\": \"REVES\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Para cambiar username/email se puede reenviar el mismo valor sin error. Para cambiar la contraseña usá «Cambiar mi contraseña»."
+          }
+        },
+        {
+          "name": "Cambiar mi contraseña",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "me",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": {\n    \"password_actual\": \"{{password}}\",\n    \"password\": \"nuevaclave987\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Exige `password_actual` además de la nueva `password`. La nueva debe pasar los validadores de Django (no muy común, no solo numérica, no parecida al usuario, mínimo 8). La sesión sigue activa después del cambio."
+          }
+        },
+        {
+          "name": "Actualizar jugador (propio)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/{{jugador_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "{{jugador_id}}",
+                ""
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"posicion\": \"INDISTINTO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Dar de baja mi cuenta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/usuarios/jugadores/{{jugador_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "jugadores",
+                "{{jugador_id}}",
+                ""
+              ]
+            },
+            "description": "Desactiva el usuario y cierra sesión. Antes sale de las partidas vigentes (la capitanía pasa al siguiente inscripto o la partida se cancela) y vence sus solicitudes/invitaciones pendientes."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clubes",
+      "item": [
+        {
+          "name": "Zonas",
+          "item": [
+            {
+              "name": "Listar zonas",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Crear zona (admin sistema)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"Palermo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('zona_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/{{zona_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    "{{zona_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Actualizar parcial",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/{{zona_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    "{{zona_id}}",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"Belgrano\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Eliminar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/{{zona_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    "{{zona_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clubes",
+          "item": [
+            {
+              "name": "Listar clubes",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "zona",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "ACTIVO",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Crear club con admin nuevo (admin sistema)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"denominacion\": \"Club Central\",\n  \"direccion\": \"Av. Siempreviva 742\",\n  \"zona\": \"{{zona_id}}\",\n  \"admin_username\": \"adminclub\",\n  \"admin_email\": \"admin@club.com\",\n  \"admin_password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "El username y el email del admin no pueden existir ya, y la contraseña debe pasar los validadores de Django. Los jugadores no reciben el campo `admin` al listar clubes."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('club_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear club con admin existente",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"denominacion\": \"Club Norte\",\n  \"direccion\": \"Calle 123\",\n  \"zona\": \"{{zona_id}}\",\n  \"admin\": 2\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Actualizar parcial",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"direccion\": \"Nueva dirección 456\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Suspender",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/suspender/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    "suspender",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Reactivar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/reactivar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    "reactivar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Dar de baja",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/dar_de_baja/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    "dar_de_baja",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Ocupación (admin club)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/ocupacion/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    "ocupacion",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "fecha",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha_desde",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha_hasta",
+                      "value": "2026-11-30",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cancha",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "CONFIRMADO",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_desde",
+                      "value": "18:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_hasta",
+                      "value": "23:00",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Eliminar (baja lógica)",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{club_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{club_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Canchas",
+          "item": [
+            {
+              "name": "Listar canchas",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "club",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "tipo",
+                      "value": "TECHADA",
+                      "disabled": true
+                    },
+                    {
+                      "key": "activa",
+                      "value": "true",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Crear cancha (admin club)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"numero\": 1,\n  \"tipo\": \"TECHADA\",\n  \"activa\": true,\n  \"club\": \"{{club_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('cancha_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/{{cancha_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    "{{cancha_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Actualizar parcial",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/{{cancha_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    "{{cancha_id}}",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tipo\": \"DESCUBIERTA\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Eliminar / desactivar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/{{cancha_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    "{{cancha_id}}",
+                    ""
+                  ]
+                },
+                "description": "Si tiene turnos, solo se desactiva."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Turnos",
+          "item": [
+            {
+              "name": "Listar turnos",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "club",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "zona",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cancha",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "LIBRE",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha_desde",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha_hasta",
+                      "value": "2026-11-30",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_desde",
+                      "value": "18:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_hasta",
+                      "value": "23:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "precio_max",
+                      "value": "20000",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Jugadores ven solo turnos LIBRES futuros de clubes activos."
+              }
+            },
+            {
+              "name": "Crear turno (admin club)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cancha\": \"{{cancha_id}}\",\n  \"fecha\": \"2026-11-01\",\n  \"hora_inicio\": \"19:00:00\",\n  \"duracion\": 90,\n  \"precio\": \"20000.00\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('turno_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear turnos en masa",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/crear_masivo/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "crear_masivo",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "[\n  {\n    \"cancha\": \"{{cancha_id}}\",\n    \"fecha\": \"2026-11-02\",\n    \"hora_inicio\": \"18:00:00\",\n    \"duracion\": 90,\n    \"precio\": \"20000.00\"\n  },\n  {\n    \"cancha\": \"{{cancha_id}}\",\n    \"fecha\": \"2026-11-02\",\n    \"hora_inicio\": \"19:30:00\",\n    \"duracion\": 90,\n    \"precio\": \"20000.00\"\n  }\n]",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Máximo 500 turnos por pedido (400 si se supera). Es todo o nada: si uno se solapa no se crea ninguno."
+              }
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Actualizar parcial",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"precio\": \"22000.00\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Marcar no disponible",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/no_disponible/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    "no_disponible",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Volver a disponible",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/disponible/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    "disponible",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Eliminar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Partidas",
+      "item": [
+        {
+          "name": "Lobbies",
+          "item": [
+            {
+              "name": "Listar lobbies",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "club",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "zona",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_desde",
+                      "value": "18:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_hasta",
+                      "value": "23:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "con_cupos",
+                      "value": "true",
+                      "disabled": true
+                    },
+                    {
+                      "key": "precio_max",
+                      "value": "5000",
+                      "disabled": true
+                    },
+                    {
+                      "key": "mios",
+                      "value": "true",
+                      "disabled": true
+                    },
+                    {
+                      "key": "privacidad",
+                      "value": "PUBLICO",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "EN_FORMACION",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Crear lobby",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"turno\": \"{{turno_id}}\",\n  \"privacidad\": \"PUBLICO\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "400 si el turno ya empezó, la cancha está inactiva o el club no está activo. 409 si el turno ya fue tomado."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('lobby_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Cambiar privacidad (capitán)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"privacidad\": \"PRIVADO\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Unirse",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "description": "Partida pública: te une. Partida privada: requiere invitación pendiente; sin invitación responde 403 (\"Esta partida es solo por invitación.\")."
+              }
+            },
+            {
+              "name": "Abandonar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/abandonar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "abandonar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Cancelar (capitán)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/cancelar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "cancelar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Eliminar = cancelar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Check-in (admin club)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/check_in/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "check_in",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"codigo_reserva\": \"{{codigo_reserva}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Valida el código de reserva (formato XXXX-XXXX). Solo se habilita desde 15 minutos antes del check-in de la partida: antes responde 409. El body debe ser un objeto JSON."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inscripciones",
+          "item": [
+            {
+              "name": "Mis inscripciones",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/inscripciones/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "inscripciones",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "lobby",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/inscripciones/1/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "inscripciones",
+                    "1",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Social",
+      "item": [
+        {
+          "name": "Contactos",
+          "item": [
+            {
+              "name": "Listar contactos",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "estado",
+                      "value": "ACEPTADO",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Enviar solicitud",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contacto\": \"{{jugador_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('contacto_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/{{contacto_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    "{{contacto_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Aceptar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/{{contacto_id}}/aceptar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    "{{contacto_id}}",
+                    "aceptar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Rechazar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/{{contacto_id}}/rechazar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    "{{contacto_id}}",
+                    "rechazar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Eliminar contacto",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/{{contacto_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    "{{contacto_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invitaciones",
+          "item": [
+            {
+              "name": "Listar invitaciones",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "rol",
+                      "value": "recibidas",
+                      "disabled": true
+                    },
+                    {
+                      "key": "lobby",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "PENDIENTE",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Invitar a lobby",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lobby\": \"{{lobby_id}}\",\n  \"receptor\": \"{{jugador_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "if (json.id !== undefined) pm.collectionVariables.set('invitacion_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/{{invitacion_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    "{{invitacion_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Aceptar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/{{invitacion_id}}/aceptar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    "{{invitacion_id}}",
+                    "aceptar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Rechazar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/{{invitacion_id}}/rechazar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    "{{invitacion_id}}",
+                    "rechazar",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Solicitudes de acceso",
+          "item": [
+            {
+              "name": "Listar solicitudes",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/solicitudes/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "solicitudes",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "lobby",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "PENDIENTE",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/solicitudes/{{solicitud_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "solicitudes",
+                    "{{solicitud_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Aceptar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/solicitudes/{{solicitud_id}}/aceptar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "solicitudes",
+                    "{{solicitud_id}}",
+                    "aceptar",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Rechazar",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/solicitudes/{{solicitud_id}}/rechazar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "solicitudes",
+                    "{{solicitud_id}}",
+                    "rechazar",
+                    ""
+                  ]
+                }
+              }
+            }
+          ],
+          "description": "Solo lectura: las partidas privadas se acceden únicamente por invitación. Las solicitudes ya existentes se pueden listar, ver, aceptar o rechazar."
+        },
+        {
+          "name": "Notificaciones",
+          "item": [
+            {
+              "name": "Listar notificaciones",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/notificaciones/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "notificaciones",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "leida",
+                      "value": "false",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Detalle",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/notificaciones/{{notificacion_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "notificaciones",
+                    "{{notificacion_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Marcar leída",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/notificaciones/{{notificacion_id}}/marcar_leida/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "notificaciones",
+                    "{{notificacion_id}}",
+                    "marcar_leida",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Marcar todas leídas",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/notificaciones/marcar_todas_leidas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "notificaciones",
+                    "marcar_todas_leidas",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "username",
+      "value": "jugador1"
+    },
+    {
+      "key": "password",
+      "value": "clave12345"
+    },
+    {
+      "key": "admin_username",
+      "value": "adminclub"
+    },
+    {
+      "key": "admin_password",
+      "value": "clave12345"
+    },
+    {
+      "key": "zona_id",
+      "value": "1"
+    },
+    {
+      "key": "club_id",
+      "value": "1"
+    },
+    {
+      "key": "cancha_id",
+      "value": "1"
+    },
+    {
+      "key": "turno_id",
+      "value": "1"
+    },
+    {
+      "key": "lobby_id",
+      "value": "1"
+    },
+    {
+      "key": "jugador_id",
+      "value": "1"
+    },
+    {
+      "key": "contacto_id",
+      "value": "1"
+    },
+    {
+      "key": "invitacion_id",
+      "value": "1"
+    },
+    {
+      "key": "solicitud_id",
+      "value": "1"
+    },
+    {
+      "key": "notificacion_id",
+      "value": "1"
+    },
+    {
+      "key": "codigo_reserva",
+      "value": "ABCD-1234"
+    },
+    {
+      "key": "access",
+      "value": ""
+    },
+    {
+      "key": "refresh",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access}}",
+        "type": "string"
+      }
+    ]
+  }
+}

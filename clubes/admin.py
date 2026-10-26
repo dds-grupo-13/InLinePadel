@@ -1,6 +1,5 @@
 from django.contrib import admin
-from . import models
 
-admin.site.register(models.Club)
-admin.site.register(models.Cancha)
-admin.site.register(models.Turno)
+from .models import Cancha, Club, Turno, Zona
+
+admin.site.register([Zona, Club, Cancha, Turno])

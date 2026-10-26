@@ -1,331 +1,193 @@
 from datetime import timedelta
+from io import StringIO
 
-from django.test import TestCase
-from django.urls import reverse
+from django.core.management import call_command
 from django.utils import timezone
 
-from clubes.models import Club, Cancha, Turno
-from social.models import SolicitudAcceso
-from usuarios.models import AdminSistema, Jugador, Usuario
+from clubes.models import Turno
+from config.test_utils import BaseAPITestCase
+from partidas.models import Lobby
+from social.models import Invitacion, SolicitudAcceso
 
-from .models import Inscripcion, Lobby, Reserva
+URL = "/api/partidas/lobbies/"
 
 
-class AceptarSolicitudViewTests(TestCase):
-    def setUp(self):
-        self.capitan_user = Usuario.objects.create_user(email='capitan@example.com', password='secret123')
-        self.capitan = Jugador.objects.create(
-            usuario=self.capitan_user,
-            nombre='Capitán',
-            apellido='Principal',
-            zona='Centro',
+class LobbyAPITests(BaseAPITestCase):
+    @staticmethod
+    def habilitar_check_in():
+        ahora = timezone.now()
+        Lobby.objects.update(
+            plazo_limite=ahora - timedelta(hours=2), fecha_check_in=ahora - timedelta(hours=1)
         )
 
-        self.solicitante_user = Usuario.objects.create_user(email='solicitante@example.com', password='secret123')
-        self.solicitante = Jugador.objects.create(
-            usuario=self.solicitante_user,
-            nombre='Jugador',
-            apellido='Solicitante',
-            zona='Norte',
-        )
+    def crear(self, jugador, turno, **extra):
+        self.login(jugador.usuario)
+        return self.client.post(URL, {"turno": turno.pk, **extra}, format="json")
 
-        self.lobby = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=1),
-        )
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=self.capitan,
-            numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
-        )
-        self.solicitud = SolicitudAcceso.objects.create(
-            lobby=self.lobby,
-            jugador=self.solicitante,
-            estado=SolicitudAcceso.Estado.PENDIENTE,
-        )
+    def test_cu01_crea_lobby_y_bloquea_turno(self):
+        j, t = self.jugador("cap"), self.turno(self.cancha)
+        r = self.crear(j, t)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["estado_reserva"], "PROVISORIA")
+        self.assertEqual(r.data["cupos_libres"], 3)
+        self.assertEqual(r.data["precio_por_jugador"], "1000.00")
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "BLOQUEADO")
+        lobby = Lobby.objects.get()
+        horas = (lobby.plazo_limite - lobby.fecha_creacion).total_seconds() / 3600
+        self.assertAlmostEqual(horas, 48, delta=0.1)
 
-    def test_capitan_puede_aceptar_solicitud(self):
-        self.client.force_login(self.capitan_user)
+    def test_turno_ya_tomado_da_409(self):
+        t = self.turno(self.cancha)
+        self.assertEqual(self.crear(self.jugador("a"), t).status_code, 201)
+        r = self.crear(self.jugador("b"), t)
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(Lobby.objects.count(), 1)
 
-        response = self.client.post(
-            reverse('partidas:aceptar_solicitud', kwargs={'pk': self.solicitud.pk}),
-            follow=True,
-        )
+    def test_limite_de_dos_lobbies_y_solape(self):
+        j = self.jugador("cap")
+        self.assertEqual(self.crear(j, self.turno(self.cancha, hora=10)).status_code, 201)
+        self.assertEqual(self.crear(j, self.turno(self.cancha, hora=14)).status_code, 201)
+        self.assertEqual(self.crear(j, self.turno(self.cancha, hora=18)).status_code, 400)
 
-        self.solicitud.refresh_from_db()
+    def test_solape_horario_del_mismo_jugador(self):
+        j = self.jugador("cap")
+        self.assertEqual(self.crear(j, self.turno(self.cancha, hora=20)).status_code, 201)
+        r = self.crear(j, self.turno(self.otra_cancha, hora=20))
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("horario", str(r.data))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.solicitud.estado, SolicitudAcceso.Estado.ACEPTADA)
-        self.assertTrue(
-            Inscripcion.objects.filter(
-                lobby=self.lobby,
-                jugador=self.solicitante,
-            ).exists()
-        )
+    def test_cu02_unirse_hasta_completar_confirma_reserva(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t).data["id"]
+        for n in ("j2", "j3"):
+            self.login(self.jugador(n).usuario)
+            r = self.client.post(f"{URL}{lobby_id}/unirse/")
+            self.assertEqual(r.status_code, 200, r.data)
+            self.assertEqual(r.data["estado_reserva"], "PROVISORIA")
+        ultimo = self.jugador("j4")
+        self.login(ultimo.usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.data["estado_reserva"], "CONFIRMADA")
+        self.assertRegex(r.data["codigo_reserva"], r"^[0-9A-F]{4}-[0-9A-F]{4}$")
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "CONFIRMADO")
+        self.login(self.jugador("j5").usuario)
+        self.assertIn(self.client.post(f"{URL}{lobby_id}/unirse/").status_code, (404, 409))
+        self.assertEqual(Lobby.objects.get().inscripciones.count(), 4)
+        self.login(self.admin)
+        codigo = Lobby.objects.get().codigo_reserva
+        self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)
+        self.habilitar_check_in()
+        self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 200)
+        self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "CUMPLIDO")
 
+    def test_check_in_de_otro_club_no_funciona(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t).data["id"]
+        for n in ("j2", "j3", "j4"):
+            self.login(self.jugador(n).usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        codigo = Lobby.objects.get().codigo_reserva
+        self.login(self.otro_admin)
+        self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 404)
 
-class InscripcionCreateViewTests(TestCase):
-    def setUp(self):
-        self.user = Usuario.objects.create_user(email='jugador@example.com', password='secret123')
-        self.jugador = Jugador.objects.create(
-            usuario=self.user,
-            nombre='Jugador',
-            apellido='Demo',
-            zona='Centro',
-        )
-        self.lobby = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=1),
-        )
-        admin = Usuario.objects.create_user(email='admin@example.com', password='secret123')
-        club = Club.objects.create(
-            denominacion='Club Test',
-            direccion='Calle Falsa 123',
-            zona='Centro',
-            habilitado_por=AdminSistema.objects.create(usuario=admin),
-        )
-        cancha = Cancha.objects.create(
-            club=club,
-            identificacion='Cancha 1',
-            tipo=Cancha.Tipo.TECHADA,
-        )
-        turno = Turno.objects.create(
-            cancha=cancha,
-            fecha=timezone.now().date() + timedelta(days=1),
-            hora_inicio=(timezone.now() + timedelta(hours=1)).time(),
-            precio=100.00,
-            estado=Turno.Estado.LIBRE,
-        )
-        self.reserva = Reserva.objects.create(
-            lobby=self.lobby,
-            turno=turno,
-            estado=Reserva.Estado.PROVISORIA,
-            codigo_reserva=None,
-        )
+    def test_lobby_privado_solo_por_invitacion(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t, privacidad="PRIVADO").data["id"]
+        self.login(self.jugador("visita").usuario)
 
-    def test_unirse_lobby_solo_acepta_post(self):
-        self.client.force_login(self.user)
+        listado = self.client.get(URL)
+        ids = [lobby["id"] for lobby in listado.data["results"]]
+        self.assertNotIn(lobby_id, ids)
+        self.assertEqual(self.client.post(f"{URL}{lobby_id}/unirse/").status_code, 404)
+        self.assertFalse(SolicitudAcceso.objects.exists())
 
-        response = self.client.get(reverse('partidas:unirse_lobby', kwargs={'lobby_id': self.lobby.pk}))
+    def test_lobby_privado_invitado_aparece_y_se_une(self):
+        cap = self.jugador("cap")
+        visita = self.jugador("visita")
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(cap, t, privacidad="PRIVADO").data["id"]
+        lobby = Lobby.objects.get(pk=lobby_id)
+        invitacion = Invitacion.objects.create(lobby=lobby, emisor=cap, receptor=visita)
 
-        self.assertEqual(response.status_code, 405)
+        self.login(visita.usuario)
+        listado = self.client.get(URL)
+        fila = next(lobby for lobby in listado.data["results"] if lobby["id"] == lobby_id)
+        self.assertTrue(fila["fui_invitado"])
 
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["cupos_ocupados"], 2)
+        invitacion.refresh_from_db()
+        self.assertEqual(invitacion.estado, "ACEPTADA")
 
-class ReservaCancelViewTests(TestCase):
-    def setUp(self):
-        # Crear admin del sistema
-        self.admin_user = Usuario.objects.create_user(email='admin@example.com', password='secret123')
-        self.admin_sistema = AdminSistema.objects.create(usuario=self.admin_user)
+    def test_solo_capitan_cancela_y_libera_turno(self):
+        t = self.turno(self.cancha)
+        cap = self.jugador("cap")
+        lobby_id = self.crear(cap, t).data["id"]
+        self.login(self.jugador("otro").usuario)
+        self.assertEqual(self.client.delete(f"{URL}{lobby_id}/").status_code, 403)
+        self.login(cap.usuario)
+        self.assertEqual(self.client.delete(f"{URL}{lobby_id}/").status_code, 204)
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "LIBRE")
 
-        # Crear club y cancha
-        self.club = Club.objects.create(
-            denominacion='Club de Padel Test',
-            direccion='Calle Principal 123',
-            zona='Centro',
-            habilitado_por=self.admin_sistema,
-        )
-        self.cancha = Cancha.objects.create(
-            club=self.club,
-            identificacion='Cancha 1',
-            tipo=Cancha.Tipo.TECHADA,
-        )
+    def test_busqueda_filtros_y_paginado(self):
+        for h in range(8, 24, 2):
+            self.crear(self.jugador(f"c{h}"), self.turno(self.cancha, hora=h, precio="4000"))
+        self.crear(self.jugador("caro"), self.turno(self.otra_cancha, hora=9, precio="20000"))
+        self.login(self.jugador("busca").usuario)
+        r = self.client.get(URL)
+        self.assertEqual(r.data["count"], 9)
+        self.assertEqual(len(r.data["results"]), 9)
+        self.assertEqual(self.client.get(f"{URL}?precio_max=1500").data["count"], 8)
+        self.assertEqual(self.client.get(f"{URL}?club={self.otro_club.pk}").data["count"], 1)
+        self.assertEqual(self.client.get(f"{URL}?hora_desde=16:00").data["count"], 4)
 
-        # Crear turno
-        self.turno = Turno.objects.create(
-            cancha=self.cancha,
-            fecha=timezone.now().date(),
-            hora_inicio=timezone.now().time(),
-            precio=100.00,
-            estado=Turno.Estado.CONFIRMADO,
-        )
+    def test_comando_vence_lobbies_y_libera_turno(self):
+        t = self.turno(self.cancha)
+        self.crear(self.jugador("cap"), t)
+        Lobby.objects.update(plazo_limite=timezone.now() - timedelta(minutes=1))
+        call_command("vencer_lobbies", stdout=StringIO())
+        self.assertEqual(Lobby.objects.get().estado, "CANCELADO")
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "LIBRE")
 
-        # Crear capitán
-        self.capitan_user = Usuario.objects.create_user(email='capitan@example.com', password='secret123')
-        self.capitan = Jugador.objects.create(
-            usuario=self.capitan_user,
-            nombre='Capitán',
-            apellido='Principal',
-            zona='Centro',
-        )
+    def test_no_se_reserva_turno_pasado_ni_cancha_inactiva(self):
+        pasado = self.turno(self.cancha, dias=-3)
+        r = self.crear(self.jugador("a"), pasado)
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertEqual(Turno.objects.get(pk=pasado.pk).estado, "LIBRE")
 
-        # Crear lobby y reserva
-        self.lobby = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=1),
-        )
-        self.reserva = Reserva.objects.create(
-            lobby=self.lobby,
-            turno=self.turno,
-            estado=Reserva.Estado.CONFIRMADA,
-            codigo_reserva='RES-ABC123DEF456',
-        )
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=self.capitan,
-            numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
-        )
+        inactiva = self.turno(self.cancha, hora=10)
+        self.cancha.activa = False
+        self.cancha.save()
+        self.assertEqual(self.crear(self.jugador("b"), inactiva).status_code, 400)
+        self.assertEqual(Lobby.objects.count(), 0)
 
-    def test_capitan_puede_cancelar_reserva(self):
-        """El capitán puede cancelar su propia reserva."""
-        self.client.force_login(self.capitan_user)
+    def test_check_in_con_body_invalido_da_400(self):
+        self.login(self.admin)
+        r = self.client.post(f"{URL}check_in/", [1, 2], format="json")
+        self.assertEqual(r.status_code, 400)
 
-        response = self.client.post(
-            reverse('partidas:cancelar_reserva', kwargs={'pk': self.reserva.pk}),
-            follow=True,
-        )
+    def test_abandonar_lobby_completo_concede_plazo_minimo(self):
+        lobby_id = self.crear(self.jugador("cap"), self.turno(self.cancha)).data["id"]
+        for n in ("j2", "j3", "j4"):
+            self.login(self.jugador(n).usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        Lobby.objects.update(plazo_limite=timezone.now() - timedelta(hours=1))
+        self.client.post(f"{URL}{lobby_id}/abandonar/")
+        lobby = Lobby.objects.get()
+        self.assertEqual(lobby.estado, "EN_FORMACION")
+        self.assertGreater(lobby.plazo_limite, timezone.now() + timedelta(hours=11))
+        self.assertLessEqual(lobby.plazo_limite, lobby.fecha_check_in)
+        call_command("vencer_lobbies", stdout=StringIO())
+        self.assertEqual(Lobby.objects.get().estado, "EN_FORMACION")
 
-        self.assertEqual(response.status_code, 200)
+    def test_valueerror_inesperado_no_se_disfraza_de_400(self):
+        from config.exceptions import manejador_excepciones
 
-        # Validar que la reserva está cancelada
-        self.reserva.refresh_from_db()
-        self.assertEqual(self.reserva.estado, Reserva.Estado.CANCELADA)
-
-        # Validar que el lobby está cancelado
-        self.lobby.refresh_from_db()
-        self.assertEqual(self.lobby.estado, Lobby.Estado.CANCELADO)
-
-        # Validar que el turno está libre
-        self.turno.refresh_from_db()
-        self.assertEqual(self.turno.estado, Turno.Estado.LIBRE)
-
-    def test_no_capitan_no_puede_cancelar_reserva(self):
-        """Un jugador que no es capitán no puede cancelar la reserva (BOLA prevention)."""
-        otro_user = Usuario.objects.create_user(email='otro@example.com', password='secret123')
-        otro_jugador = Jugador.objects.create(
-            usuario=otro_user,
-            nombre='Otro',
-            apellido='Jugador',
-            zona='Norte',
-        )
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=otro_jugador,
-            numero_cupo=2,
-            rol=Inscripcion.Rol.JUGADOR,
-        )
-
-        self.client.force_login(otro_user)
-
-        response = self.client.get(
-            reverse('partidas:cancelar_reserva', kwargs={'pk': self.reserva.pk}),
-        )
-
-        # Debe retornar 404 (no encontrado) porque el usuario no es el capitán
-        self.assertEqual(response.status_code, 404)
-
-        # La reserva no debe estar cancelada
-        self.reserva.refresh_from_db()
-        self.assertEqual(self.reserva.estado, Reserva.Estado.CONFIRMADA)
-
-    def test_usuario_no_autenticado_redirige_a_login(self):
-        """Un usuario no autenticado es redirigido a la página de login."""
-        response = self.client.get(
-            reverse('partidas:cancelar_reserva', kwargs={'pk': self.reserva.pk}),
-        )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/login/', response.url)
-
-
-class ReservaCheckInViewTests(TestCase):
-    def setUp(self):
-        self.admin_user = Usuario.objects.create_user(email='admin_checkin@example.com', password='secret123')
-        self.admin_sistema = AdminSistema.objects.create(usuario=self.admin_user)
-        self.club = Club.objects.create(
-            denominacion='Club Check-In',
-            direccion='Calle Check 123',
-            zona='Centro',
-            habilitado_por=self.admin_sistema,
-        )
-        self.cancha = Cancha.objects.create(
-            club=self.club,
-            identificacion='Cancha A',
-            tipo=Cancha.Tipo.TECHADA,
-        )
-        self.turno = Turno.objects.create(
-            cancha=self.cancha,
-            fecha=timezone.now().date(),
-            hora_inicio=timezone.now().time(),
-            precio=100.00,
-            estado=Turno.Estado.CONFIRMADO,
-        )
-        self.capitan_user = Usuario.objects.create_user(email='capitan_checkin@example.com', password='secret123')
-        self.capitan = Jugador.objects.create(
-            usuario=self.capitan_user,
-            nombre='Capitán',
-            apellido='CheckIn',
-            zona='Sur',
-        )
-        self.lobby = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=1),
-        )
-        self.reserva = Reserva.objects.create(
-            lobby=self.lobby,
-            turno=self.turno,
-            estado=Reserva.Estado.CONFIRMADA,
-            codigo_reserva='RES-CHECK-001',
-        )
-        Inscripcion.objects.create(
-            lobby=self.lobby,
-            jugador=self.capitan,
-            numero_cupo=1,
-            rol=Inscripcion.Rol.CAPITAN,
-        )
-
-    def test_capitan_puede_hacer_check_in_de_reserva_confirmada(self):
-        self.client.force_login(self.capitan_user)
-
-        response = self.client.post(
-            reverse('partidas:reserva_checkin', kwargs={'pk': self.reserva.pk}),
-            follow=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-
-        self.reserva.refresh_from_db()
-        self.turno.refresh_from_db()
-        self.lobby.refresh_from_db()
-        self.assertEqual(self.reserva.estado, Reserva.Estado.CUMPLIDA)
-        self.assertIsNotNone(self.reserva.fecha_check_in)
-        self.assertEqual(self.turno.estado, Turno.Estado.CUMPLIDO)
-        self.assertEqual(self.lobby.estado, Lobby.Estado.JUGADO)
-
-    def test_reserva_no_confirmada_no_puede_hacer_check_in(self):
-        lobby_provisoria = Lobby.objects.create(
-            privacidad=Lobby.Privacidad.PUBLICO,
-            plazo_limite=timezone.now() + timedelta(days=2),
-        )
-        reserva_provisoria = Reserva.objects.create(
-            lobby=lobby_provisoria,
-            turno=Turno.objects.create(
-                cancha=self.cancha,
-                fecha=timezone.now().date() + timedelta(days=1),
-                hora_inicio=(timezone.now() + timedelta(hours=2)).time(),
-                precio=120.00,
-                estado=Turno.Estado.BLOQUEADO,
-            ),
-            estado=Reserva.Estado.PROVISORIA,
-            codigo_reserva='RES-PROV-1',
-        )
-        self.client.force_login(self.capitan_user)
-
-        response = self.client.post(
-            reverse('partidas:reserva_checkin', kwargs={'pk': reserva_provisoria.pk}),
-            follow=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        reserva_provisoria.refresh_from_db()
-        self.assertEqual(reserva_provisoria.estado, Reserva.Estado.PROVISORIA)
-        self.assertIsNone(reserva_provisoria.fecha_check_in)
-
-    def test_usuario_no_autenticado_redirige_a_login(self):
-        response = self.client.get(
-            reverse('partidas:reserva_checkin', kwargs={'pk': self.reserva.pk}),
-        )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/login/', response.url)
+        self.assertIsNone(manejador_excepciones(ValueError("bug"), {}))
