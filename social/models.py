@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models.functions import Greatest, Least
+from django.utils import timezone
 
 from config.exceptions import Conflicto
 
@@ -70,6 +71,12 @@ class Contacto(models.Model):
 
     def __str__(self):
         return f"{self.jugador_id} -> {self.contacto_id} ({self.estado})"
+
+    @classmethod
+    def son_contactos(cls, a, b):
+        return cls.objects.filter(estado=cls.Estado.ACEPTADO).filter(
+            models.Q(jugador=a, contacto=b) | models.Q(jugador=b, contacto=a)
+        ).exists()
 
 
 class _PedidoLobby:
@@ -187,6 +194,13 @@ class Invitacion(_PedidoLobby, models.Model):
         choices=Estado.choices,
         default=Estado.PENDIENTE,
     )
+    reemplaza = models.ForeignKey(
+        "usuarios.Jugador",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cesiones_ofrecidas",
+    )
     fecha = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -195,6 +209,11 @@ class Invitacion(_PedidoLobby, models.Model):
         ordering = ["-fecha"]
 
         constraints = [
+            models.UniqueConstraint(
+                fields=["lobby", "reemplaza"],
+                condition=models.Q(estado=ESTADO_PENDIENTE, reemplaza__isnull=False),
+                name="cesion_pendiente_unica_por_lobby",
+            ),
             models.UniqueConstraint(
                 fields=["lobby", "receptor"],
                 condition=models.Q(estado=ESTADO_PENDIENTE),
@@ -210,14 +229,78 @@ class Invitacion(_PedidoLobby, models.Model):
     def jugador_a_inscribir(self):
         return self.receptor
 
+    @property
+    def es_cesion(self):
+        return self.reemplaza_id is not None
+
     def clean(self):
         super().clean()
         if not (self.lobby_id and self.emisor_id and self.receptor_id):
             return
-        self._validar_lobby_abierto()
+        if self.es_cesion:
+            if self.reemplaza_id != self.emisor_id:
+                raise ValidationError({"reemplaza": "Solo se puede ceder el propio lugar."})
+            if self.lobby.estado != self.lobby.Estado.COMPLETO:
+                raise ValidationError("Solo se puede ceder el lugar en una partida completa.")
+        else:
+            self._validar_lobby_abierto()
         if not self.lobby.inscripciones.filter(jugador=self.emisor).exists():
             raise ValidationError({"emisor": "Solo un inscripto puede invitar al lobby."})
         self._validar_no_inscripto(self.receptor, "receptor")
+
+    def aceptar(self):
+        if not self.es_cesion:
+            return super().aceptar()
+        with transaction.atomic():
+            # Mismo orden de locks que el resto: primero el lobby, después el pedido.
+            lobby = type(self.lobby).objects.select_for_update().get(pk=self.lobby_id)
+            self._transicionar(self.Estado.ACEPTADA)
+            self._ceder_lugar(lobby)
+
+    def _ceder_lugar(self, lobby):
+        from partidas.models import Inscripcion
+        from .notificaciones import notificar
+
+        turno = lobby.turno
+        if lobby.estado != lobby.Estado.COMPLETO:
+            raise Conflicto("La partida ya no está completa: el lugar dejó de estar disponible.")
+        if timezone.now() >= turno.inicio:
+            raise Conflicto("La partida ya comenzó.")
+        cupo = Inscripcion.objects.filter(lobby=lobby, jugador=self.emisor)
+        if not cupo.exists():
+            raise Conflicto(f"{self.emisor.usuario.username} ya no está en la partida.")
+        if Inscripcion.objects.filter(lobby=lobby, jugador=self.receptor).exists():
+            raise Conflicto("Ya estás inscripto en esta partida.")
+        type(self.receptor).objects.select_for_update().filter(pk=self.receptor_id).first()
+        superpuesto = type(lobby).conflicto_horario(
+            self.receptor, turno, excluir_lobby=lobby.pk
+        )
+        if superpuesto:
+            raise Conflicto(
+                "Ya participás de otra partida en ese horario "
+                f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
+            )
+        cupo.update(jugador=self.receptor)
+        if lobby.capitan_id == self.emisor_id:
+            type(lobby).objects.filter(pk=lobby.pk).update(capitan_id=self.receptor_id)
+
+        cuando = f"{turno.fecha:%d/%m} a las {turno.hora_inicio:%H:%M}"
+        emisor, receptor = self.emisor.usuario, self.receptor.usuario
+        otros = list(
+            lobby.inscripciones.exclude(jugador=self.receptor).values_list(
+                "jugador__usuario_id", flat=True
+            )
+        )
+        notificar(
+            [emisor.pk],
+            f"Ya no estás en la partida del {cuando}: {receptor.username} ocupó tu lugar.",
+        )
+        notificar(otros, f"{receptor.username} reemplaza a {emisor.username} en la partida del {cuando}.")
+        notificar(
+            [receptor.pk],
+            f"Ya sos parte de la partida del {cuando} en {turno.cancha.club.denominacion} "
+            f"— código {lobby.codigo_reserva}.",
+        )
 
     def __str__(self):
         return f"Invitación {self.emisor_id} -> {self.receptor_id} (lobby {self.lobby_id})"

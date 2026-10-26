@@ -282,14 +282,18 @@ class Lobby(models.Model):
             if lobby.es_firme(ahora):
                 desde = timezone.localtime(lobby.cierre)
                 raise Conflicto(
-                    f"La reserva ya es firme desde las {desde:%H:%M}: no podés bajarte."
+                    f"La reserva ya es firme desde las {desde:%H:%M}: no podés bajarte. "
+                    "Podés ceder tu lugar a un contacto."
                 )
             Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).delete()
+            self._expirar_cesiones(jugador)
 
             reabierto = Lobby.objects.filter(
                 pk=self.pk, estado=self.Estado.COMPLETO
             ).update(estado=self.Estado.EN_FORMACION)
             if reabierto:
+                # Una cesión solo tiene sentido con la partida completa.
+                self._expirar_cesiones()
                 Turno = self._meta.get_field("turno").related_model
                 plazo = min(
                     max(
@@ -413,6 +417,16 @@ class Lobby(models.Model):
             f"Se canceló la partida del {turno.fecha:%d/%m} a las "
             f"{turno.hora_inicio:%H:%M}; el turno quedó libre.",
         )
+
+    def _expirar_cesiones(self, emisor=None):
+        from social.models import Invitacion
+
+        cesiones = Invitacion.objects.filter(
+            lobby_id=self.pk, estado=Invitacion.Estado.PENDIENTE, reemplaza__isnull=False
+        )
+        if emisor is not None:
+            cesiones = cesiones.filter(reemplaza=emisor)
+        cesiones.update(estado=Invitacion.Estado.EXPIRADA)
 
     def _expirar_pendientes(self):
         from social.models import Invitacion, SolicitudAcceso

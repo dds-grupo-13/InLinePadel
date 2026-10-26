@@ -4,6 +4,7 @@ from django.utils import timezone
 from clubes.models import Turno
 
 from partidas.models import Lobby
+from social.models import Invitacion
 
 
 class Command(BaseCommand):
@@ -26,6 +27,12 @@ class Command(BaseCommand):
             except ValueError:
                 continue
 
+        # Las cesiones pendientes de partidas que ya se jugaron pierden sentido.
+        Invitacion.objects.filter(
+            estado=Invitacion.Estado.PENDIENTE,
+            lobby__estado=Lobby.Estado.COMPLETO,
+            lobby__turno__fin__lt=ahora,
+        ).update(estado=Invitacion.Estado.EXPIRADA)
         jugados = Lobby.objects.filter(
             estado=Lobby.Estado.COMPLETO, turno__fin__lt=ahora
         ).update(estado=Lobby.Estado.JUGADO)

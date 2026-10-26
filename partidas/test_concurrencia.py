@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from clubes.models import Cancha, Club, Turno, Zona
 from config.exceptions import Conflicto, _es_falla_de_bloqueo
-from partidas.models import Lobby
+from partidas.models import Inscripcion, Lobby
+from social.models import Invitacion
 from usuarios.models import Jugador, Usuario
 
 
@@ -169,3 +170,45 @@ class ConcurrenciaTests(TransactionTestCase):
                 self.assertEqual(lobby.inscripciones.count(), 3)
                 self.assertIsNone(lobby.codigo_reserva)
                 self.assertEqual(turno.estado, Turno.Estado.BLOQUEADO)
+
+    def test_e_aceptar_una_cesion_y_cancelar_el_club_terminan_consistentes(self):
+        for ronda in range(10):
+            with self.subTest(ronda=ronda):
+                turno = self.nuevo_turno(dias=10 + ronda, hora=9)
+                capitan = self.jugador(f"cap{ronda}")
+                lobby = Lobby.crear(turno, capitan)
+                emisor = self.jugador(f"emisor{ronda}")
+                lobby.inscribir(emisor)
+                for nombre in ("j3", "j4"):
+                    lobby.inscribir(self.jugador(f"{nombre}_{ronda}"))
+                receptor = self.jugador(f"receptor{ronda}")
+                cesion = Invitacion(
+                    lobby=lobby, emisor=emisor, receptor=receptor, reemplaza=emisor
+                )
+                cesion.save()
+
+                resultados = self.en_paralelo(
+                    [
+                        lambda: Invitacion.objects.get(pk=cesion.pk).aceptar(),
+                        lambda: Lobby.objects.get(pk=lobby.pk)._cancelar(
+                            Lobby.CanceladaPor.CLUB, "Lluvia fuerte", Turno.Estado.NO_DISPONIBLE
+                        ),
+                    ]
+                )
+
+                self.assertEqual([r[1] for r in resultados if r[0] == "error"], [])
+                aceptar, cancelar = resultados
+                self.assertEqual(cancelar[0], "ok")
+                lobby.refresh_from_db()
+                cesion.refresh_from_db()
+                self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
+                self.assertEqual(lobby.inscripciones.count(), 4)
+                en_lobby = Inscripcion.objects.filter(lobby=lobby)
+                if aceptar[0] == "ok":
+                    self.assertTrue(en_lobby.filter(jugador=receptor).exists())
+                    self.assertFalse(en_lobby.filter(jugador=emisor).exists())
+                    self.assertEqual(cesion.estado, Invitacion.Estado.ACEPTADA)
+                else:
+                    self.assertFalse(en_lobby.filter(jugador=receptor).exists())
+                    self.assertTrue(en_lobby.filter(jugador=emisor).exists())
+                    self.assertEqual(cesion.estado, Invitacion.Estado.EXPIRADA)

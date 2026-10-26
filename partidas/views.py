@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Count, Exists, F, OuterRef, Q, Subquery
+from django.db.models import Count, Exists, F, OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -12,12 +12,14 @@ from rest_framework.response import Response
 from clubes.models import Club, Turno
 from config.exceptions import Conflicto
 from config.permissions import EsAdminClub, EsJugador
-from social.models import Invitacion
+from social.models import Contacto, Invitacion
+from social.serializers import InvitacionSerializer
 from social.notificaciones import notificar
 
 from .filters import LobbyFilter
 from .models import Inscripcion, Lobby
 from .serializers import (
+    CederLugarSerializer,
     InscripcionSerializer,
     LobbySerializer,
     ProximoLobbySerializer,
@@ -42,18 +44,35 @@ class LobbyViewSet(viewsets.ModelViewSet):
             receptor=jugador,
             estado=Invitacion.Estado.PENDIENTE,
         )
+        cesion = Invitacion.objects.filter(
+            lobby=OuterRef("pk"),
+            receptor=jugador,
+            estado=Invitacion.Estado.PENDIENTE,
+            reemplaza__isnull=False,
+        )
         return (
             Lobby.objects.select_related(
                 "turno", "turno__cancha", "turno__cancha__club", "capitan__usuario"
             )
-            .prefetch_related("inscripciones__jugador__usuario")
+            .prefetch_related(
+                "inscripciones__jugador__usuario",
+                Prefetch(
+                    "invitaciones",
+                    queryset=Invitacion.objects.filter(
+                        reemplaza=jugador, estado=Invitacion.Estado.PENDIENTE
+                    ),
+                    to_attr="mis_cesiones",
+                ),
+            )
             .annotate(
                 ocupados=Count("inscripciones", distinct=True),
                 es_mio=Exists(propios),
                 es_invitado=Exists(invitado),
+                tiene_cesion=Exists(cesion),
             )
             .filter(
                 Q(es_mio=True)
+                | Q(tiene_cesion=True)
                 | (
                     Q(
                         estado=Lobby.Estado.EN_FORMACION,
@@ -184,6 +203,51 @@ class LobbyViewSet(viewsets.ModelViewSet):
         return self._responder(lobby)
 
     @action(detail=True, methods=["post"])
+    def ceder(self, request, pk=None):
+        lobby = self.get_object()
+        emisor = request.user.jugador
+        entrada = CederLugarSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        receptor = entrada.validated_data["receptor"]
+        if receptor.pk == emisor.pk:
+            raise ValidationError("No podés cederte el lugar a vos mismo.")
+        with transaction.atomic():
+            bloqueado = Lobby.objects.select_for_update().get(pk=lobby.pk)
+            if bloqueado.estado != Lobby.Estado.COMPLETO:
+                raise Conflicto("Solo se puede ceder el lugar en una partida completa.")
+            turno = lobby.turno
+            if timezone.now() >= turno.inicio:
+                raise Conflicto("La partida ya comenzó.")
+            if not lobby.inscripciones.filter(jugador=emisor).exists():
+                raise PermissionDenied("Solo un jugador inscripto puede ceder su lugar.")
+            if not Contacto.son_contactos(emisor, receptor):
+                raise Conflicto("Solo podés ceder tu lugar a jugadores de tu lista de contactos.")
+            if lobby.inscripciones.filter(jugador=receptor).exists():
+                raise Conflicto("Ese jugador ya está inscripto en la partida.")
+            superpuesto = Lobby.conflicto_horario(receptor, turno, excluir_lobby=lobby.pk)
+            if superpuesto:
+                raise Conflicto(
+                    "Ese jugador ya participa de otra partida en ese horario "
+                    f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
+                )
+            if lobby.invitaciones.filter(
+                reemplaza=emisor, estado=Invitacion.Estado.PENDIENTE
+            ).exists():
+                raise Conflicto("Ya ofreciste tu lugar: esperá la respuesta.")
+            invitacion = Invitacion(
+                lobby=lobby, emisor=emisor, receptor=receptor, reemplaza=emisor
+            )
+            invitacion.save()
+        club = turno.cancha.club
+        notificar(
+            [receptor.usuario_id],
+            f"{request.user.username} te ofrece su lugar en la partida del "
+            f"{turno.fecha:%d/%m} {turno.hora_inicio:%H:%M} en {club.denominacion}. "
+            f"La reserva está confirmada; tu parte es ${turno.precio / Lobby.CANTIDAD_CUPOS:.2f}.",
+        )
+        return Response(InvitacionSerializer(invitacion).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
     def abandonar(self, request, pk=None):
         lobby = self.get_object()
         jugador = request.user.jugador
@@ -225,6 +289,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
             if not pasado:
                 raise Conflicto("Esta reserva ya fue utilizada o no está confirmada.")
             Turno.objects.filter(pk=lobby.turno_id).update(estado=Turno.Estado.CUMPLIDO)
+            lobby._expirar_pendientes()
         return Response({"detail": "Check-in registrado.", "lobby": lobby.pk})
 
 

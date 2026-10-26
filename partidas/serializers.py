@@ -5,6 +5,8 @@ from rest_framework import serializers
 from clubes.models import Turno
 from clubes.serializers import TurnoSerializer
 from config.exceptions import Conflicto
+from social.models import Invitacion
+from usuarios.models import Jugador
 from usuarios.serializers import JugadorPublicoSerializer
 
 from .models import Inscripcion, Lobby
@@ -17,6 +19,10 @@ class InscripcionSerializer(serializers.ModelSerializer):
         model = Inscripcion
         fields = ["id", "lobby", "jugador", "numero_cupo", "fecha_inscripcion"]
         read_only_fields = fields
+
+
+class CederLugarSerializer(serializers.Serializer):
+    receptor = serializers.PrimaryKeyRelatedField(queryset=Jugador.objects.all())
 
 
 class ProximoLobbySerializer(serializers.Serializer):
@@ -45,6 +51,8 @@ class LobbySerializer(serializers.ModelSerializer):
     puede_cancelar = serializers.SerializerMethodField()
     puede_abandonar = serializers.SerializerMethodField()
     aviso_cierre = serializers.SerializerMethodField()
+    puede_ceder = serializers.SerializerMethodField()
+    cesion_pendiente = serializers.SerializerMethodField()
 
     class Meta:
         model = Lobby
@@ -55,7 +63,8 @@ class LobbySerializer(serializers.ModelSerializer):
             "precio_total", "precio_por_jugador", "estado_reserva",
             "mensaje_reserva", "codigo_reserva", "cierre", "reserva_firme",
             "puede_cancelar", "puede_abandonar", "cancelada_por",
-            "motivo_cancelacion", "aviso_cierre",
+            "motivo_cancelacion", "aviso_cierre", "puede_ceder",
+            "cesion_pendiente",
         ]
         read_only_fields = [
             "estado", "fecha_creacion", "plazo_limite", "fecha_check_in",
@@ -107,6 +116,31 @@ class LobbySerializer(serializers.ModelSerializer):
     def get_puede_abandonar(self, lobby):
         jugador = self._jugador()
         return bool(jugador) and lobby.puede_abandonar(jugador)
+
+    def _mi_cesion(self, lobby):
+        jugador = self._jugador()
+        if not jugador:
+            return None
+        propias = getattr(lobby, "mis_cesiones", None)
+        if propias is None:
+            propias = lobby.invitaciones.filter(
+                reemplaza=jugador, estado=Invitacion.Estado.PENDIENTE
+            )
+        return next(iter(propias), None)
+
+    def get_puede_ceder(self, lobby):
+        return (
+            lobby.estado == Lobby.Estado.COMPLETO
+            and timezone.now() < lobby.turno.inicio
+            and self._inscripto(lobby)
+            and self._mi_cesion(lobby) is None
+        )
+
+    def get_cesion_pendiente(self, lobby):
+        cesion = self._mi_cesion(lobby)
+        if cesion is None:
+            return None
+        return {"id": cesion.pk, "receptor": cesion.receptor_id}
 
     def get_aviso_cierre(self, lobby):
         cierre = timezone.localtime(lobby.cierre)
