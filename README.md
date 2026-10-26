@@ -58,7 +58,9 @@ pip install -r requirements.txt
 ```
 
 4. Configurar la base de datos en el `.env` (copiar de `.env.example`) y
-   aplicar migraciones + datos demo:
+   aplicar migraciones + datos demo. Para desarrollo local el `.env` tiene que
+   incluir `DEBUG=1` y `ALLOWED_HOSTS=localhost,127.0.0.1`: sin `DEBUG` el
+   default es `0` (producción) y el servidor rechaza los hosts no listados.
 
 ```bash
 python manage.py migrate
