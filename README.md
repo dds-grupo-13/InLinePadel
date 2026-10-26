@@ -72,6 +72,36 @@ Docker está en `../InLinePadel-Interfaz/docker-compose.yml`.
 
 ---
 
+## Tests
+
+Suite completa (SQLite, sin dependencias externas):
+
+```bash
+USE_SQLITE=1 SECRET_KEY=x python manage.py test
+```
+
+### Concurrencia contra PostgreSQL (RNF02)
+
+`partidas/test_concurrencia.py` valida el anti-overbooking con hilos reales
+(50 solicitudes sobre el último cupo, 20 capitanes sobre el mismo turno,
+cancelar contra ocupar el último cupo). SQLite no puede validarlo, así que
+esos tests se saltean salvo que la base sea PostgreSQL. El `db` del
+docker-compose no publica el puerto; una forma de correrlo:
+
+```bash
+docker run --rm -d --name pg-test -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres postgres:17
+```
+
+Con un `.env` que apunte a esa base (`DB_NAME=postgres`, `DB_USER=postgres`,
+`DB_PASSWORD=postgres`, `DB_HOST=localhost`, `DB_PORT=5432`):
+
+```bash
+python manage.py test partidas.test_concurrencia
+```
+
+---
+
 ## Autenticación (JWT) y CORS
 
 Variable de entorno (ver `.env.example`): `CORS_ALLOWED_ORIGINS`, orígenes del frontend separados por coma (por defecto `http://localhost:4200`).
