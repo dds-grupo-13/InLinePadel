@@ -121,6 +121,17 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
+# Con varios workers el throttling de DRF necesita una caché compartida: la
+# caché por defecto (LocMemCache) es por proceso y cada worker contaría aparte.
+# En producción se puede reemplazar por Redis. La tabla se crea con
+# `python manage.py createcachetable`.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "cache_inlinepadel",
+    }
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",

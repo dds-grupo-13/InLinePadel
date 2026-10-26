@@ -64,9 +64,13 @@ pip install -r requirements.txt
 
 ```bash
 python manage.py migrate
+python manage.py createcachetable
 python manage.py seed_demo_data
 python manage.py runserver
 ```
+
+`createcachetable` crea la tabla de la caché compartida que usa el throttling
+(límite de intentos de login) cuando hay varios workers.
 
 El comando `seed_demo_data` es idempotente: crea zonas, clubes, canchas,
 turnos, partidas y los usuarios demo para la presentación. El despliegue con
