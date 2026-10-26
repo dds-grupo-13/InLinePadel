@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
 from clubes.models import Turno
@@ -88,7 +89,7 @@ class LobbySerializer(serializers.ModelSerializer):
             return "Partida cancelada — el turno quedó libre"
         if lobby.estado == Lobby.Estado.EN_FORMACION:
             faltan = Lobby.CANTIDAD_CUPOS - self._ocupados(lobby)
-            vence = lobby.plazo_limite.astimezone()
+            vence = timezone.localtime(lobby.plazo_limite)
             return (
                 f"Reserva provisoria — faltan {faltan} jugadores, "
                 f"vence el {vence:%d/%m} a las {vence:%H:%M}"

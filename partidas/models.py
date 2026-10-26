@@ -136,7 +136,7 @@ class Lobby(models.Model):
             if superpuesto:
                 raise ErrorDominio(
                     "Ya participás de otra partida en ese horario "
-                    f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                    f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
                 )
             bloqueado = Turno.objects.filter(
                 pk=turno.pk, estado=Turno.Estado.LIBRE
@@ -167,7 +167,7 @@ class Lobby(models.Model):
                 if superpuesto:
                     raise Conflicto(
                         "Ya participás de otra partida en ese horario "
-                        f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                        f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
                     )
                 estado = Lobby.objects.values_list("estado", flat=True).get(pk=self.pk)
                 if estado != self.Estado.EN_FORMACION:

@@ -101,6 +101,12 @@ class LobbyCrearTests(LobbyBaseTestCase):
         with self.assertRaises(ErrorDominio):
             Lobby.crear(superpuesto, self.capitan)
 
+    def test_mensaje_de_superposicion_usa_hora_local(self):
+        Lobby.crear(self.turno(self.cancha, dias=5, hora=19), self.capitan)
+        with self.assertRaises(ErrorDominio) as ctx:
+            Lobby.crear(self.turno(self.otra_cancha, dias=5, hora=19), self.capitan)
+        self.assertIn("19:00", str(ctx.exception))
+
     def test_falla_atomica_no_deja_el_turno_bloqueado(self):
         antes = self.turno_libre.inicio
         with self.assertRaises(ValidationError):
@@ -214,6 +220,14 @@ class LobbyInscribirTests(LobbyBaseTestCase):
         Lobby.crear(otro_turno, j2)
         with self.assertRaises(Conflicto):
             self.lobby.inscribir(j2)
+
+    def test_mensaje_de_superposicion_al_inscribir_usa_hora_local(self):
+        j2 = self.jugador("j2")
+        Lobby.crear(self.turno(self.otra_cancha, dias=5, hora=19), j2)
+        lobby = Lobby.crear(self.turno(self.cancha, dias=5, hora=19), self.jugador("cap2"))
+        with self.assertRaises(Conflicto) as ctx:
+            lobby.inscribir(j2)
+        self.assertIn("19:00", str(ctx.exception))
 
     def test_lobby_cancelado_no_acepta_jugadores(self):
         self.lobby.cancelar()

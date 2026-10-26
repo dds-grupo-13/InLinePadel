@@ -132,7 +132,8 @@ class TurnoQuerySet(models.QuerySet):
                     if actual.inicio < anterior.fin:
                         raise ValidationError(
                             f"Dos turnos nuevos se solapan en la cancha {cancha_id}: "
-                            f"{anterior.inicio:%d/%m %H:%M} y {actual.inicio:%d/%m %H:%M}."
+                            f"{timezone.localtime(anterior.inicio):%d/%m %H:%M} y "
+                            f"{timezone.localtime(actual.inicio):%d/%m %H:%M}."
                         )
                 existentes = self.model.objects.filter(
                     cancha_id=cancha_id,
@@ -143,7 +144,7 @@ class TurnoQuerySet(models.QuerySet):
                     for turno in nuevos:
                         if turno.inicio < fin and ini < turno.fin:
                             raise ValidationError(
-                                f"El turno {turno.inicio:%d/%m %H:%M} de la cancha "
+                                f"El turno {timezone.localtime(turno.inicio):%d/%m %H:%M} de la cancha "
                                 f"{cancha_id} se solapa con uno existente."
                             )
             return self.bulk_create(turnos)
