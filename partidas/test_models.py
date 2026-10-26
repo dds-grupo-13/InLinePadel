@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -246,6 +247,25 @@ class LobbyInscribirTests(LobbyBaseTestCase):
         with self.assertRaises(Conflicto) as ctx:
             lobby.inscribir(j2)
         self.assertIn("19:00", str(ctx.exception))
+
+    def test_no_confirma_si_el_lobby_se_cancelo_mientras_ocupaba_el_ultimo_cupo(self):
+        for nombre in ("j2", "j3"):
+            self.lobby.inscribir(self.jugador(nombre))
+
+        def cancelar_en_paralelo(*args, **kwargs):
+            Lobby.objects.filter(pk=self.lobby.pk).update(estado=Lobby.Estado.CANCELADO)
+
+        with mock.patch.object(Lobby, "conflicto_horario", side_effect=cancelar_en_paralelo):
+            with self.assertRaises(Conflicto):
+                self.lobby.inscribir(self.jugador("j4"))
+        lobby = Lobby.objects.get(pk=self.lobby.pk)
+        self.assertIsNone(lobby.codigo_reserva)
+        self.assertEqual(lobby.inscripciones.count(), 3)
+        self.turno_libre.refresh_from_db()
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.BLOQUEADO)
+        self.assertFalse(
+            Notificacion.objects.filter(mensaje__startswith="Reserva confirmada").exists()
+        )
 
     def test_lobby_cancelado_no_acepta_jugadores(self):
         self.lobby.cancelar()
