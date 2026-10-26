@@ -57,11 +57,18 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. Ejecutar el servidor:
+4. Configurar la base de datos en el `.env` (copiar de `.env.example`) y
+   aplicar migraciones + datos demo:
 
 ```bash
+python manage.py migrate
+python manage.py seed_demo_data
 python manage.py runserver
 ```
+
+El comando `seed_demo_data` es idempotente: crea zonas, clubes, canchas,
+turnos, partidas y los usuarios demo para la presentación. El despliegue con
+Docker está en `../InLinePadel-Interfaz/docker-compose.yml`.
 
 ---
 
