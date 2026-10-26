@@ -1,4 +1,5 @@
 import threading
+from time import sleep
 from datetime import time, timedelta
 from decimal import Decimal
 from unittest import skipUnless
@@ -6,6 +7,7 @@ from unittest import skipUnless
 from django.db import OperationalError, connection
 from django.test import TransactionTestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from clubes.models import Cancha, Club, Turno, Zona
 from config.exceptions import Conflicto, _es_falla_de_bloqueo
@@ -212,3 +214,32 @@ class ConcurrenciaTests(TransactionTestCase):
                     self.assertFalse(en_lobby.filter(jugador=receptor).exists())
                     self.assertTrue(en_lobby.filter(jugador=emisor).exists())
                     self.assertEqual(cesion.estado, Invitacion.Estado.EXPIRADA)
+
+    def test_f_quince_unirse_por_http_sobre_el_ultimo_cupo_dan_un_200_y_catorce_409(self):
+        # Varias rondas: los perdedores que llegan después de que el ganador
+        # confirmó son los que, con la vista vieja, recibían 404.
+        for ronda in range(5):
+            with self.subTest(ronda=ronda):
+                turno = self.nuevo_turno(dias=10 + ronda, hora=9)
+                lobby = Lobby.crear(turno, self.jugador(f"capitan{ronda}"))
+                for nombre in ("j2", "j3"):
+                    lobby.inscribir(self.jugador(f"{nombre}_{ronda}"))
+                aspirantes = [self.jugador(f"aspirante{ronda}_{n}") for n in range(15)]
+
+                def unirse(demora, jugador, lobby=lobby):
+                    # Llegadas escalonadas: algunas ocurren cuando el ganador ya confirmó.
+                    sleep(demora)
+                    cliente = APIClient()
+                    cliente.force_authenticate(jugador.usuario)
+                    return cliente.post(f"/api/partidas/lobbies/{lobby.pk}/unirse/").status_code
+
+                resultados = self.en_paralelo([(lambda n=n, j=j: unirse(0.02 * n, j)) for n, j in enumerate(aspirantes)])
+
+                self.assertEqual([r[1] for r in resultados if r[0] == "error"], [])
+                codigos = sorted(r[1] for r in resultados if r[0] == "ok")
+                self.assertEqual(codigos, [200] + [409] * 14)
+                lobby.refresh_from_db()
+                self.assertEqual(lobby.inscripciones.count(), 4)
+                self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
+                self.assertIsNotNone(lobby.codigo_reserva)
+        self.assertEqual(Lobby.objects.exclude(codigo_reserva=None).count(), 5)

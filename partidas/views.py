@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Prefetch, Q, Subquery
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -36,7 +37,8 @@ class LobbyViewSet(viewsets.ModelViewSet):
             return [EsAdminClub()]
         return [IsAuthenticated(), EsJugador()]
 
-    def get_queryset(self):
+    def _queryset_base(self):
+        """Todos los lobbies, con las anotaciones del jugador, sin filtrar visibilidad."""
         jugador = self.request.user.jugador
         propios = Inscripcion.objects.filter(lobby=OuterRef("pk"), jugador=jugador)
         invitado = Invitacion.objects.filter(
@@ -70,23 +72,38 @@ class LobbyViewSet(viewsets.ModelViewSet):
                 es_invitado=Exists(invitado),
                 tiene_cesion=Exists(cesion),
             )
-            .filter(
-                Q(es_mio=True)
-                | Q(tiene_cesion=True)
-                | (
-                    Q(
-                        estado=Lobby.Estado.EN_FORMACION,
-                        turno__inicio__gt=timezone.now(),
-                        turno__cancha__club__estado=Club.Estado.ACTIVO,
-                    )
-                    & (
-                        Q(privacidad=Lobby.Privacidad.PUBLICO)
-                        | Q(es_invitado=True)
-                    )
-                )
-            )
             .order_by("turno__inicio", "pk")
         )
+
+    def get_queryset(self):
+        return self._queryset_base().filter(
+            Q(es_mio=True)
+            | Q(tiene_cesion=True)
+            | (
+                Q(
+                    estado=Lobby.Estado.EN_FORMACION,
+                    turno__inicio__gt=timezone.now(),
+                    turno__cancha__club__estado=Club.Estado.ACTIVO,
+                )
+                & (Q(privacidad=Lobby.Privacidad.PUBLICO) | Q(es_invitado=True))
+            )
+        )
+
+    def _lobby_para_unirse(self):
+        # Respeta la privacidad pero no el estado: quien pierde la carrera por el
+        # último cupo tiene que recibir 409 y no 404. Un lobby privado sigue
+        # oculto salvo para sus inscriptos y para quien fue invitado alguna vez.
+        jugador = self.request.user.jugador
+        con_invitacion = Invitacion.objects.filter(lobby=OuterRef("pk"), receptor=jugador)
+        visibles = self._queryset_base().annotate(tuvo_invitacion=Exists(con_invitacion)).filter(
+            Q(es_mio=True)
+            | Q(tiene_cesion=True)
+            | Q(tuvo_invitacion=True)
+            | Q(privacidad=Lobby.Privacidad.PUBLICO)
+        )
+        lobby = get_object_or_404(visibles, pk=self.kwargs["pk"])
+        self.check_object_permissions(self.request, lobby)
+        return lobby
 
     def _responder(self, lobby, codigo=status.HTTP_200_OK):
         lobby = self.get_queryset().get(pk=lobby.pk)
@@ -173,15 +190,24 @@ class LobbyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def unirse(self, request, pk=None):
-        lobby = self.get_object()
+        lobby = self._lobby_para_unirse()
         jugador = request.user.jugador
         if lobby.inscripciones.filter(jugador=jugador).exists():
             return Response(
                 {"detail": "Ya estás inscripto en esta partida."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if lobby.estado != Lobby.Estado.EN_FORMACION or lobby.ocupados >= Lobby.CANTIDAD_CUPOS:
+        if lobby.estado == Lobby.Estado.CANCELADO:
+            raise Conflicto("La partida fue cancelada.")
+        if (
+            lobby.estado in (Lobby.Estado.COMPLETO, Lobby.Estado.JUGADO)
+            or lobby.ocupados >= Lobby.CANTIDAD_CUPOS
+        ):
             raise Conflicto("El partido ya está completo.")
+        if lobby.turno.inicio <= timezone.now():
+            raise Conflicto("La partida ya comenzó.")
+        if lobby.turno.cancha.club.estado != Club.Estado.ACTIVO:
+            raise Conflicto("El club no está recibiendo reservas en este momento.")
 
         invitacion = lobby.invitaciones.filter(
             receptor=jugador, estado=Invitacion.Estado.PENDIENTE
