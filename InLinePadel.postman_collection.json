@@ -1447,7 +1447,7 @@
                     }
                   }
                 },
-                "description": "400 si el turno ya empezó, la cancha está inactiva o el club no está activo. 409 si el turno ya fue tomado."
+                "description": "400 si el turno ya empezó o ya pasó, la cancha está inactiva, el club no está activo o ya sos capitán de 2 partidas en formación. 409 si el turno ya fue tomado o retirado de la oferta, o si ya participás de otra partida en ese horario."
               },
               "event": [
                 {

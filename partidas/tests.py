@@ -54,7 +54,7 @@ class LobbyAPITests(BaseAPITestCase):
         j = self.jugador("cap")
         self.assertEqual(self.crear(j, self.turno(self.cancha, hora=20)).status_code, 201)
         r = self.crear(j, self.turno(self.otra_cancha, hora=20))
-        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.status_code, 409)
         self.assertIn("horario", str(r.data))
 
     def test_cu02_unirse_hasta_completar_confirma_reserva(self):

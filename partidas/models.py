@@ -142,7 +142,7 @@ class Lobby(models.Model):
                 )
             superpuesto = cls.conflicto_horario(capitan, turno)
             if superpuesto:
-                raise ErrorDominio(
+                raise Conflicto(
                     "Ya participás de otra partida en ese horario "
                     f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
                 )
@@ -150,7 +150,7 @@ class Lobby(models.Model):
                 pk=turno.pk, estado=Turno.Estado.LIBRE
             ).update(estado=Turno.Estado.BLOQUEADO)
             if not bloqueado:
-                raise Conflicto("El turno ya fue tomado por otro jugador.")
+                cls._rechazar_turno_no_libre(turno)
             turno.estado = Turno.Estado.BLOQUEADO
             lobby = cls(turno=turno, capitan=capitan, **campos)
             lobby.full_clean()
@@ -164,6 +164,18 @@ class Lobby(models.Model):
                 f"(cancha {turno.cancha.numero}) reservado provisoriamente.",
             )
             return lobby
+
+    @classmethod
+    def _rechazar_turno_no_libre(cls, turno):
+        Turno = cls._meta.get_field("turno").related_model
+        actual = (
+            Turno.objects.filter(pk=turno.pk).values_list("estado", flat=True).first()
+        )
+        if actual == Turno.Estado.NO_DISPONIBLE:
+            raise Conflicto("El club retiró este turno de la oferta.")
+        if actual == Turno.Estado.CUMPLIDO:
+            raise ErrorDominio("El turno ya pasó.")
+        raise Conflicto("El turno ya fue tomado por otro jugador.")
 
     def inscribir(self, jugador):
         for _ in range(self.CANTIDAD_CUPOS):

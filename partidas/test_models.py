@@ -98,8 +98,26 @@ class LobbyCrearTests(LobbyBaseTestCase):
     def test_rechaza_horario_superpuesto_del_capitan(self):
         Lobby.crear(self.turno_libre, self.capitan)
         superpuesto = self.turno(self.otra_cancha, dias=3, hora=20)
-        with self.assertRaises(ErrorDominio):
+        with self.assertRaises(Conflicto):
             Lobby.crear(superpuesto, self.capitan)
+
+    def test_turno_ocupado_da_mensaje_segun_su_estado(self):
+        casos = (
+            (Turno.Estado.BLOQUEADO, Conflicto, "ya fue tomado"),
+            (Turno.Estado.CONFIRMADO, Conflicto, "ya fue tomado"),
+            (Turno.Estado.NO_DISPONIBLE, Conflicto, "retiró este turno"),
+            (Turno.Estado.CUMPLIDO, ErrorDominio, "ya pasó"),
+        )
+        for i, (estado, excepcion, texto) in enumerate(casos):
+            with self.subTest(estado=estado):
+                turno = self.turno(self.cancha, dias=7, hora=8 + 3 * i)
+                Turno.objects.filter(pk=turno.pk).update(estado=estado)
+                turno.refresh_from_db()
+                turno.estado = Turno.Estado.LIBRE
+                with self.assertRaises(excepcion) as ctx:
+                    Lobby.crear(turno, self.jugador(f"cap_{estado}"))
+                self.assertIs(type(ctx.exception), excepcion)
+                self.assertIn(texto, str(ctx.exception))
 
     def test_mensaje_de_superposicion_usa_hora_local(self):
         Lobby.crear(self.turno(self.cancha, dias=5, hora=19), self.capitan)
