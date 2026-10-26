@@ -1411,9 +1411,73 @@
                       "key": "estado",
                       "value": "EN_FORMACION",
                       "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "COMPLETO",
+                      "disabled": true
+                    },
+                    {
+                      "key": "orden",
+                      "value": "-inicio",
+                      "disabled": true
                     }
                   ]
-                }
+                },
+                "description": "estado admite varios valores (?estado=EN_FORMACION&estado=COMPLETO). orden acepta inicio o -inicio (inicio del turno)."
+              }
+            },
+            {
+              "name": "Resumen por club",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/resumen_por_club/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "resumen_por_club",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "zona",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "club",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "fecha",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_desde",
+                      "value": "18:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "hora_hasta",
+                      "value": "23:00",
+                      "disabled": true
+                    },
+                    {
+                      "key": "precio_max",
+                      "value": "5000",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Sin paginar: una fila por club con partidas en formación, con cupos libres y donde el jugador no está inscripto. Respeta la privacidad y acepta los mismos filtros que el listado. Devuelve club, disponibles, cupos_libres, invitaciones y proximo (id, fecha, hora_inicio, inicio)."
               }
             },
             {

@@ -19,6 +19,13 @@ class InscripcionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ProximoLobbySerializer(serializers.Serializer):
+    id = serializers.IntegerField(source="pk")
+    fecha = serializers.DateField(source="turno.fecha")
+    hora_inicio = serializers.TimeField(source="turno.hora_inicio")
+    inicio = serializers.DateTimeField(source="turno.inicio")
+
+
 class LobbySerializer(serializers.ModelSerializer):
     turno = serializers.PrimaryKeyRelatedField(queryset=Turno.objects.con_cancha())
     turno_detalle = TurnoSerializer(source="turno", read_only=True)

@@ -13,6 +13,8 @@ class LobbyFilter(django_filters.FilterSet):
     con_cupos = django_filters.BooleanFilter(method="filtrar_con_cupos")
     precio_max = django_filters.NumberFilter(method="filtrar_precio_max")
     mios = django_filters.BooleanFilter(method="filtrar_mios")
+    estado = django_filters.MultipleChoiceFilter(choices=Lobby.Estado.choices)
+    orden = django_filters.OrderingFilter(fields=(("turno__inicio", "inicio"),))
 
     class Meta:
         model = Lobby
