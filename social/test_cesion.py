@@ -11,7 +11,7 @@ LOBBIES = "/api/partidas/lobbies/"
 INVITACIONES = "/api/social/invitaciones/"
 
 
-class CesionTests(BaseAPITestCase):
+class CesionBase(BaseAPITestCase):
     def setUp(self):
         super().setUp()
         self.cap = self.jugador("cap")
@@ -43,6 +43,8 @@ class CesionTests(BaseAPITestCase):
         self.login(receptor.usuario)
         return self.client.post(f"{INVITACIONES}{id_invitacion}/{accion}/")
 
+
+class CesionTests(CesionBase):
     def test_ceder_despues_del_cierre_conserva_codigo_y_cupo(self):
         self.hacer_firme()
         self.amigos(self.j2, self.amigo)
@@ -216,3 +218,43 @@ class CesionTests(BaseAPITestCase):
         r = self.client.post(f"{LOBBIES}{self.lobby.pk}/abandonar/")
         self.assertEqual(r.status_code, 409)
         self.assertIn("ceder tu lugar", r.data["detail"])
+
+
+class AvisoCierreTests(CesionBase):
+    """El aviso de cierre depende de quién mira la partida."""
+
+    def aviso(self, jugador):
+        self.login(jugador.usuario)
+        return self.client.get(f"{LOBBIES}{self.lobby.pk}/").data["aviso_cierre"]
+
+    def test_inscripto_antes_del_cierre_ve_hasta_cuando_puede_bajarse(self):
+        self.assertTrue(self.aviso(self.j2).startswith("Podés bajarte hasta el "))
+
+    def test_inscripto_con_reserva_firme_ve_que_no_puede_bajarse(self):
+        self.hacer_firme()
+        self.assertEqual(self.aviso(self.j2), "Reserva firme: ya no se puede bajar nadie.")
+
+    def test_receptor_de_una_cesion_firme_ve_la_advertencia(self):
+        self.hacer_firme()
+        self.amigos(self.j2, self.amigo)
+        self.ceder(self.j2, self.amigo)
+        self.assertEqual(
+            self.aviso(self.amigo),
+            "Si aceptás, la reserva ya es firme: no vas a poder bajarte.",
+        )
+
+    def test_receptor_de_una_cesion_no_firme_no_ve_aviso(self):
+        self.amigos(self.j2, self.amigo)
+        self.ceder(self.j2, self.amigo)
+        self.assertIsNone(self.aviso(self.amigo))
+
+    def test_partida_de_ultimo_momento_la_ve_cualquiera(self):
+        ahora = timezone.localtime() + timedelta(hours=2)
+        turno = Turno.objects.create(
+            cancha=self.otra_cancha, fecha=ahora.date(),
+            hora_inicio=ahora.time().replace(second=0, microsecond=0), precio=4000,
+        )
+        lobby = Lobby.crear(turno, self.jugador("cap_ultimo"))
+        self.login(self.amigo.usuario)
+        aviso = self.client.get(f"{LOBBIES}{lobby.pk}/").data["aviso_cierre"]
+        self.assertTrue(aviso.startswith("Partida de último momento"))

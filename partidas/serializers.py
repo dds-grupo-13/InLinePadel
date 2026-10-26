@@ -142,12 +142,27 @@ class LobbySerializer(serializers.ModelSerializer):
             return None
         return {"id": cesion.pk, "receptor": cesion.receptor_id}
 
+    def _recibio_cesion(self, lobby):
+        jugador = self._jugador()
+        if not jugador:
+            return False
+        anotado = getattr(lobby, "tiene_cesion", None)
+        if anotado is not None:
+            return anotado
+        return lobby.invitaciones.filter(
+            receptor=jugador, estado=Invitacion.Estado.PENDIENTE, reemplaza__isnull=False
+        ).exists()
+
     def get_aviso_cierre(self, lobby):
-        cierre = timezone.localtime(lobby.cierre)
         if lobby.estado == Lobby.Estado.COMPLETO:
-            if lobby.es_firme():
-                return "Reserva firme: ya no se puede bajar nadie."
-            return f"Podés bajarte hasta el {cierre:%d/%m} a las {cierre:%H:%M}."
+            if self._inscripto(lobby):
+                if lobby.es_firme():
+                    return "Reserva firme: ya no se puede bajar nadie."
+                cierre = timezone.localtime(lobby.cierre)
+                return f"Podés bajarte hasta el {cierre:%d/%m} a las {cierre:%H:%M}."
+            if lobby.es_firme() and self._recibio_cesion(lobby):
+                return "Si aceptás, la reserva ya es firme: no vas a poder bajarte."
+            return None
         if (
             lobby.estado == Lobby.Estado.EN_FORMACION
             and timezone.now() >= lobby.cierre
