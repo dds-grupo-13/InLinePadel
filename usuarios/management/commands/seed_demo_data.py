@@ -116,6 +116,8 @@ class Command(BaseCommand):
         lobby_c = self._lobby(turno_c, carlos, [maria], privacidad=Lobby.Privacidad.PRIVADO)
         lobby_d = self._lobby(turno_d, nico, [maria, carlos, lucia])
 
+        escenarios = self._escenarios_cierre(club_sur, maria, carlos, lucia, nico, sofia)
+
         lobby_check_in = self._lobby_check_in(sofia, maria, carlos, nico)
         lobby_jugado = self._lobby_jugado(maria, carlos, lucia, nico)
 
@@ -162,12 +164,78 @@ class Command(BaseCommand):
             )
         self.stdout.write(f"  Historial jugado    {CODIGO_JUGADO} (lobby {lobby_jugado.pk})")
         self.stdout.write("")
+        self._imprimir_escenarios_cierre(lobby_d, escenarios)
+        self.stdout.write("")
         self.stdout.write(
             "El check-in con CHK-DEMO funciona ya porque el turno es pasado; "
             "para repetirlo, volvé a correr este comando."
         )
         if superadmin is None:
             self.stdout.write(self.style.WARNING("No se pudo crear el superusuario."))
+
+    def _escenarios_cierre(self, club, maria, carlos, lucia, nico, sofia):
+        """Partidas relativas a `ahora` para probar el horario de cierre.
+
+        Se borran y se recrean en cada corrida (en canchas dedicadas), porque su
+        horario depende del momento en que se corre el comando.
+        """
+        canchas = [
+            self._cancha(club, 9, Cancha.Tipo.TECHADA),
+            self._cancha(club, 10, Cancha.Tipo.TECHADA),
+        ]
+        Lobby.objects.filter(turno__cancha__in=canchas).delete()
+        Turno.objects.filter(cancha__in=canchas).delete()
+
+        inicio_firme = timezone.localtime() + timedelta(hours=2)
+        inicio_firme = inicio_firme.replace(second=0, microsecond=0)
+        if inicio_firme.minute % 30:
+            inicio_firme += timedelta(minutes=30 - inicio_firme.minute % 30)
+        # El de último momento termina justo cuando empieza el firme: así una misma
+        # persona no tiene superposición horaria entre los dos escenarios.
+        inicio_ultimo = inicio_firme - timedelta(minutes=90)
+
+        turno_firme = self._turno(
+            canchas[0], inicio_firme.date(), inicio_firme.time(), 2400
+        )
+        turno_ultimo = self._turno(
+            canchas[1], inicio_ultimo.date(), inicio_ultimo.time(), 2400
+        )
+
+        firme = self._lobby(turno_firme, lucia, [nico, maria, carlos])
+        ultimo = self._lobby(turno_ultimo, sofia, [])
+
+        self._contacto(maria, sofia, Contacto.Estado.ACEPTADO)
+        cesion = None
+        if firme is not None and firme.estado == Lobby.Estado.COMPLETO:
+            cesion = Invitacion(lobby=firme, emisor=maria, receptor=sofia, reemplaza=maria)
+            cesion.save()
+        return {"firme": firme, "ultimo": ultimo, "cesion": cesion}
+
+    def _imprimir_escenarios_cierre(self, lobby_d, escenarios):
+        self.stdout.write(f"Escenarios del horario de cierre ({Lobby.HORAS_CIERRE} h antes del inicio):")
+        if lobby_d is not None and lobby_d.estado == Lobby.Estado.COMPLETO:
+            cierre = timezone.localtime(lobby_d.cierre)
+            self.stdout.write(
+                f"  Completa, se puede bajar  lobby {lobby_d.pk} (cierre {cierre:%d/%m %H:%M})"
+            )
+        firme, ultimo, cesion = (escenarios[k] for k in ("firme", "ultimo", "cesion"))
+        if firme is not None:
+            inicio = timezone.localtime(firme.turno.inicio)
+            self.stdout.write(
+                f"  Reserva firme             lobby {firme.pk} (empieza {inicio:%d/%m %H:%M}, "
+                f"código {firme.codigo_reserva}): nadie puede bajarse, solo ceder"
+            )
+        if ultimo is not None:
+            inicio = timezone.localtime(ultimo.turno.inicio)
+            self.stdout.write(
+                f"  En formación, último momento  lobby {ultimo.pk} "
+                f"(empieza {inicio:%d/%m %H:%M}): al completarse queda firme"
+            )
+        if cesion is not None:
+            self.stdout.write(
+                f"  Cesión pendiente          invitación {cesion.pk}: María ofrece su lugar "
+                f"en el lobby {cesion.lobby_id} a Sofía (sofia@inlinepadel.com la puede aceptar)"
+            )
 
     def _limpiar_lobbies_vencidos(self):
         vencidos = Lobby.objects.filter(

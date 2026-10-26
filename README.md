@@ -104,6 +104,34 @@ python manage.py test partidas.test_concurrencia
 
 ---
 
+## Reglas de cancelación
+
+El **horario de cierre** es `inicio del turno − 3 h` (`Lobby.HORAS_CIERRE`). Es el
+momento en que una reserva confirmada pasa a ser **firme**. Los lobbies exponen
+`cierre`, `reserva_firme`, `puede_cancelar`, `puede_abandonar`, `puede_ceder`,
+`cesion_pendiente` y `aviso_cierre`: el front se guía por esos campos.
+
+| Situación | Capitán | Cualquier inscripto | Club |
+|---|---|---|---|
+| **En formación** (reserva provisoria) | Puede cancelar; el turno queda libre | Puede salir. Si sale el capitán, la capitanía pasa al siguiente; si sale el último, se cancela | Puede cancelar con motivo (turno no disponible) |
+| **Completa, antes del cierre** | No puede cancelar | Puede bajarse: la partida vuelve a en formación, el código deja de valer, el turno pasa a bloqueado, se avisa a los demás y al club. El plazo reabierto nunca supera el cierre. También puede ceder su lugar | Puede cancelar con motivo |
+| **Completa, después del cierre** (firme) | No puede cancelar | No puede bajarse; solo ceder su lugar a un contacto | Puede cancelar con motivo (única vía) |
+
+- **Plazo al crear:** `min(ahora + 48 h, cierre)`. Una partida de último momento
+  (creada dentro de la ventana de cierre) tiene plazo hasta el inicio: apenas se
+  completa, queda firme.
+- **Cancelación por el club:** `POST /api/clubes/turnos/{id}/cancelar_por_club/`
+  con `motivo` (5 a 200 caracteres), antes del inicio del turno.
+- **Ceder el lugar:** `POST /api/partidas/lobbies/{id}/ceder/` con `receptor` (un
+  contacto aceptado). Es una invitación de reemplazo (`tipo: CESION`): al
+  aceptarla, el receptor ocupa el mismo cupo y se conserva el código.
+- **Dar de baja la cuenta:** se rechaza (409) si el jugador está en una partida
+  con reserva firme.
+- Cada lobby cancelado guarda `cancelada_por` (`CAPITAN`, `ABANDONO`,
+  `VENCIMIENTO`, `CLUB`, `SISTEMA`) y `motivo_cancelacion`.
+
+---
+
 ## Autenticación (JWT) y CORS
 
 Variable de entorno (ver `.env.example`): `CORS_ALLOWED_ORIGINS`, orígenes del frontend separados por coma (por defecto `http://localhost:4200`).

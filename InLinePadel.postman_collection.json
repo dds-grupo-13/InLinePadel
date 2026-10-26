@@ -1316,6 +1316,60 @@
               }
             },
             {
+              "name": "Cancelar partida por el club (fuerza mayor)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{turno_id}}/cancelar_por_club/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{turno_id}}",
+                    "cancelar_por_club",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"motivo\": \"Lluvia: cancha descubierta inhabilitada\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Solo admin del club. Cancela la partida vigente del turno (en formación, completa o firme) antes de su inicio. motivo: 5 a 200 caracteres. El turno queda NO_DISPONIBLE y se avisa a los inscriptos. 400 si el turno ya pasó, 404 si es de otro club, 409 si no hay partida para cancelar."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Cancela la partida o informa que no hay una', function () {",
+                      "  pm.expect(pm.response.code).to.be.oneOf([200, 409]);",
+                      "});",
+                      "if (pm.response.code === 200) {",
+                      "  pm.test('El turno queda no disponible', function () {",
+                      "    pm.expect(pm.response.json().estado).to.eql('NO_DISPONIBLE');",
+                      "  });",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
               "name": "Eliminar",
               "request": {
                 "method": "DELETE",
@@ -1624,6 +1678,94 @@
               }
             },
             {
+              "name": "Abandonar reserva firme (409)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/abandonar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "abandonar",
+                    ""
+                  ]
+                },
+                "description": "Usar con un lobby COMPLETO cuyo `reserva_firme` es true (pasó el cierre). Nadie puede bajarse: 409. La salida es ceder el lugar a un contacto."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('No se puede bajar de una reserva firme', function () {",
+                      "  pm.response.to.have.status(409);",
+                      "  pm.expect(pm.response.json().detail).to.include('firme');",
+                      "});"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Ceder lugar a un contacto",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/ceder/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "ceder",
+                    ""
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"receptor\": \"{{jugador_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "El lobby tiene que estar COMPLETO y el receptor ser un contacto aceptado, sin estar inscripto ni tener otra partida en ese horario. Crea una invitación de reemplazo (`tipo: CESION`); el receptor la acepta en Social > Invitaciones > Aceptar y ocupa el mismo cupo, con el mismo código de reserva. 409 si no cumple las condiciones."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "pm.test('Crea la cesión', function () {",
+                      "  pm.response.to.have.status(201);",
+                      "  pm.expect(json.tipo).to.eql('CESION');",
+                      "});",
+                      "if (json.id !== undefined) pm.collectionVariables.set('invitacion_id', json.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
               "name": "Cancelar (capitán)",
               "request": {
                 "method": "POST",
@@ -1643,6 +1785,42 @@
                   ]
                 }
               }
+            },
+            {
+              "name": "Cancelar partida completa (409)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/cancelar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "cancelar",
+                    ""
+                  ]
+                },
+                "description": "Usar con un lobby COMPLETO. Nadie puede cancelar una partida completa, ni siquiera el capitán: 409. Cada jugador puede bajarse hasta el cierre (3 h antes del inicio, campo `cierre`); después la reserva es firme."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Una partida completa no se cancela', function () {",
+                      "  pm.response.to.have.status(409);",
+                      "  pm.expect(pm.response.json().detail).to.include('completa');",
+                      "});"
+                    ]
+                  }
+                }
+              ]
             },
             {
               "name": "Eliminar = cancelar",
@@ -2037,7 +2215,8 @@
                     "aceptar",
                     ""
                   ]
-                }
+                },
+                "description": "Si la invitación es una cesión (`tipo: CESION`), el receptor reemplaza al emisor en su cupo: la partida sigue COMPLETA, con el mismo código. 409 si ya no se cumplen las condiciones (la invitación pasa a EXPIRADA)."
               }
             },
             {
