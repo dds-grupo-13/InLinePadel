@@ -1535,7 +1535,7 @@
                     ""
                   ]
                 },
-                "description": "En lobby privado sin invitación genera una solicitud (202)."
+                "description": "Partida pública: te une. Partida privada: requiere invitación pendiente; sin invitación responde 403 (\"Esta partida es solo por invitación.\")."
               }
             },
             {
@@ -2034,51 +2034,6 @@
               }
             },
             {
-              "name": "Solicitar acceso",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/api/social/solicitudes/",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "api",
-                    "social",
-                    "solicitudes",
-                    ""
-                  ]
-                },
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"lobby\": \"{{lobby_id}}\"\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                }
-              },
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "type": "text/javascript",
-                    "exec": [
-                      "const json = pm.response.json();",
-                      "if (json.id !== undefined) pm.collectionVariables.set('solicitud_id', json.id);"
-                    ]
-                  }
-                }
-              ]
-            },
-            {
               "name": "Detalle",
               "request": {
                 "method": "GET",
@@ -2140,7 +2095,8 @@
                 }
               }
             }
-          ]
+          ],
+          "description": "Solo lectura: las partidas privadas se acceden únicamente por invitación. Las solicitudes ya existentes se pueden listar, ver, aceptar o rechazar."
         },
         {
           "name": "Notificaciones",
