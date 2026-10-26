@@ -147,6 +147,10 @@ class TurnoSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class CancelacionClubSerializer(serializers.Serializer):
+    motivo = serializers.CharField(min_length=5, max_length=200)
+
+
 class TurnoOcupacionSerializer(serializers.ModelSerializer):
     cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
     lobby = serializers.SerializerMethodField()
