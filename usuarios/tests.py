@@ -46,6 +46,21 @@ class UsuariosAPITests(BaseAPITestCase):
         r = self.client.post("/api/usuarios/auth/login/", {"username": "n", "password": "m"})
         self.assertEqual(r.status_code, 429)
 
+    def test_login_exitoso_no_cuenta_como_intento(self):
+        self.jugador("ana")
+        self.jugador("beto")
+        for _ in range(12):
+            for u in ("ana", "beto"):
+                r = self.client.post("/api/usuarios/auth/login/", {"username": u, "password": "clave12345"})
+                self.assertEqual(r.status_code, 200, r.data)
+
+    def test_fallos_de_un_usuario_no_bloquean_a_otro(self):
+        self.jugador("ana")
+        for _ in range(11):
+            self.client.post("/api/usuarios/auth/login/", {"username": "n", "password": "m"})
+        r = self.client.post("/api/usuarios/auth/login/", {"username": "ana", "password": "clave12345"})
+        self.assertEqual(r.status_code, 200)
+
     def test_no_puede_modificar_perfil_ajeno(self):
         a, b = self.jugador("a"), self.jugador("b")
         self.login(a.usuario)

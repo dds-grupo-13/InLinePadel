@@ -1,3 +1,7 @@
+from datetime import timedelta
+
+from django.utils import timezone
+
 from config.test_utils import BaseAPITestCase
 from partidas.models import Lobby
 from social.models import Contacto, Invitacion, Notificacion
@@ -86,3 +90,36 @@ class SocialAPITests(BaseAPITestCase):
         r = self.client.get("/api/social/notificaciones/")
         self.assertEqual(r.data["count"], 1)
         self.assertEqual(self.client.post("/api/social/notificaciones/marcar_todas_leidas/").data["marcadas"], 1)
+
+
+class InvitacionLobbyVencidoTests(BaseAPITestCase):
+    def preparar(self):
+        cap, amigo = self.jugador("cap"), self.jugador("amigo")
+        lobby = Lobby.crear(self.turno(self.cancha), cap)
+        Lobby.objects.filter(pk=lobby.pk).update(
+            plazo_limite=timezone.now() - timedelta(minutes=1)
+        )
+        return cap, amigo, lobby
+
+    def test_aceptar_invitacion_de_lobby_vencido_da_409(self):
+        cap, amigo, lobby = self.preparar()
+        Lobby.objects.filter(pk=lobby.pk).update(plazo_limite=timezone.now() + timedelta(hours=1))
+        lobby.refresh_from_db()
+        inv = Invitacion.objects.create(lobby=lobby, emisor=cap, receptor=amigo)
+        Lobby.objects.filter(pk=lobby.pk).update(plazo_limite=timezone.now() - timedelta(minutes=1))
+        self.login(amigo.usuario)
+        r = self.client.post(f"/api/social/invitaciones/{inv.pk}/aceptar/")
+        self.assertEqual(r.status_code, 409, r.data)
+        inv.refresh_from_db()
+        lobby.refresh_from_db()
+        self.assertEqual(inv.estado, "EXPIRADA")
+        self.assertEqual(lobby.estado, "CANCELADO")
+
+    def test_invitar_a_lobby_vencido_da_409(self):
+        cap, amigo, lobby = self.preparar()
+        Contacto.objects.create(jugador=cap, contacto=amigo, estado=Contacto.Estado.ACEPTADO)
+        self.login(cap.usuario)
+        r = self.client.post(
+            "/api/social/invitaciones/", {"lobby": lobby.pk, "receptor": amigo.pk}, format="json"
+        )
+        self.assertEqual(r.status_code, 409, r.data)

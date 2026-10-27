@@ -448,3 +448,79 @@ class LobbyAPITests(BaseAPITestCase):
         from config.exceptions import manejador_excepciones
 
         self.assertIsNone(manejador_excepciones(ValueError("bug"), {}))
+
+
+class LobbyVencidoAPITests(BaseAPITestCase):
+    def lobby_vencido(self, turno=None, nombre="cap"):
+        self.login(self.jugador(nombre).usuario)
+        r = self.client.post(URL, {"turno": (turno or self.turno(self.cancha)).pk}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        Lobby.objects.filter(pk=r.data["id"]).update(
+            plazo_limite=timezone.now() - timedelta(minutes=1)
+        )
+        return Lobby.objects.get(pk=r.data["id"])
+
+    def test_unirse_a_lobby_vencido_da_409_y_persiste_el_vencimiento(self):
+        lobby = self.lobby_vencido()
+        self.login(self.jugador("otro").usuario)
+        r = self.client.post(f"{URL}{lobby.pk}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, "CANCELADO")
+        self.assertEqual(lobby.cancelada_por, "VENCIMIENTO")
+        lobby.turno.refresh_from_db()
+        self.assertEqual(lobby.turno.estado, "LIBRE")
+        self.assertEqual(lobby.inscripciones.count(), 1)
+
+    def test_listado_publico_no_incluye_vencidos_y_mios_los_marca(self):
+        lobby = self.lobby_vencido()
+        self.login(self.jugador("otro").usuario)
+        self.assertEqual(self.client.get(URL).data["results"], [])
+        self.login(lobby.capitan.usuario)
+        r = self.client.get(f"{URL}?mios=true")
+        self.assertEqual(len(r.data["results"]), 1)
+        d = r.data["results"][0]
+        self.assertTrue(d["vencido"])
+        self.assertFalse(d["puede_cancelar"])
+        self.assertFalse(d["puede_abandonar"])
+
+    def test_resumen_por_club_no_cuenta_vencidos(self):
+        self.lobby_vencido()
+        self.login(self.jugador("otro").usuario)
+        self.assertEqual(self.client.get(f"{URL}resumen_por_club/").data, [])
+
+    def test_capitan_cancela_lobby_vencido_da_409_y_queda_vencimiento(self):
+        lobby = self.lobby_vencido()
+        r = self.client.post(f"{URL}{lobby.pk}/cancelar/")
+        self.assertEqual(r.status_code, 409, r.data)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.cancelada_por, "VENCIMIENTO")
+
+    def test_grilla_de_turnos_libera_el_turno_del_lobby_vencido(self):
+        lobby = self.lobby_vencido()
+        turnos = "/api/clubes/turnos/"
+        self.login(self.jugador("otro").usuario)
+        for url in (turnos, f"{turnos}?estado=LIBRE"):
+            filas = {t["id"]: t for t in self.client.get(url).data["results"]}
+            self.assertEqual(filas[lobby.turno_id]["estado"], "LIBRE", url)
+        self.login(self.admin)
+        fila = next(
+            t for t in self.client.get(turnos).data["results"] if t["id"] == lobby.turno_id
+        )
+        self.assertEqual((fila["estado"], fila["liberable"]), ("BLOQUEADO", True))
+
+    def test_no_disponible_sobre_turno_de_lobby_vencido(self):
+        lobby = self.lobby_vencido()
+        self.login(self.admin)
+        r = self.client.post(f"/api/clubes/turnos/{lobby.turno_id}/no_disponible/")
+        self.assertEqual(r.status_code, 200, r.data)
+        lobby.refresh_from_db()
+        lobby.turno.refresh_from_db()
+        self.assertEqual(lobby.turno.estado, "NO_DISPONIBLE")
+        self.assertEqual(lobby.cancelada_por, "VENCIMIENTO")
+
+    def test_comando_no_cancela_un_lobby_que_se_completo(self):
+        lobby = self.lobby_vencido()
+        Lobby.objects.filter(pk=lobby.pk).update(estado="COMPLETO")
+        call_command("vencer_lobbies", stdout=StringIO())
+        self.assertEqual(Lobby.objects.get().estado, "COMPLETO")

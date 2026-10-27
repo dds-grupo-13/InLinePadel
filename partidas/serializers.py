@@ -53,6 +53,7 @@ class LobbySerializer(serializers.ModelSerializer):
     aviso_cierre = serializers.SerializerMethodField()
     puede_ceder = serializers.SerializerMethodField()
     cesion_pendiente = serializers.SerializerMethodField()
+    vencido = serializers.SerializerMethodField()
 
     class Meta:
         model = Lobby
@@ -64,7 +65,7 @@ class LobbySerializer(serializers.ModelSerializer):
             "mensaje_reserva", "codigo_reserva", "cierre", "reserva_firme",
             "puede_cancelar", "puede_abandonar", "cancelada_por",
             "motivo_cancelacion", "aviso_cierre", "puede_ceder",
-            "cesion_pendiente",
+            "cesion_pendiente", "vencido",
         ]
         read_only_fields = [
             "estado", "fecha_creacion", "plazo_limite", "fecha_check_in",
@@ -109,13 +110,16 @@ class LobbySerializer(serializers.ModelSerializer):
     def get_reserva_firme(self, lobby):
         return lobby.es_firme()
 
+    def get_vencido(self, lobby):
+        return lobby.esta_vencido()
+
     def get_puede_cancelar(self, lobby):
         jugador = self._jugador()
-        return bool(jugador) and lobby.puede_cancelar(jugador)
+        return bool(jugador) and not lobby.esta_vencido() and lobby.puede_cancelar(jugador)
 
     def get_puede_abandonar(self, lobby):
         jugador = self._jugador()
-        return bool(jugador) and lobby.puede_abandonar(jugador)
+        return bool(jugador) and not lobby.esta_vencido() and lobby.puede_abandonar(jugador)
 
     def _mi_cesion(self, lobby):
         jugador = self._jugador()
@@ -154,6 +158,8 @@ class LobbySerializer(serializers.ModelSerializer):
         ).exists()
 
     def get_aviso_cierre(self, lobby):
+        if lobby.esta_vencido():
+            return None
         if lobby.estado == Lobby.Estado.COMPLETO:
             if self._inscripto(lobby):
                 if lobby.es_firme():
@@ -183,6 +189,8 @@ class LobbySerializer(serializers.ModelSerializer):
                 Lobby.CanceladaPor.VENCIMIENTO: " por vencimiento del plazo",
             }.get(lobby.cancelada_por, "")
             return f"Partida cancelada{motivo} — el turno quedó libre"
+        if lobby.esta_vencido():
+            return "Venció el plazo sin completar los cupos; la partida se va a cancelar."
         if lobby.estado == Lobby.Estado.EN_FORMACION:
             faltan = Lobby.CANTIDAD_CUPOS - self._ocupados(lobby)
             vence = timezone.localtime(lobby.plazo_limite)

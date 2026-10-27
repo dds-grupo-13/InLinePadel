@@ -243,3 +243,35 @@ class ConcurrenciaTests(TransactionTestCase):
                 self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
                 self.assertIsNotNone(lobby.codigo_reserva)
         self.assertEqual(Lobby.objects.exclude(codigo_reserva=None).count(), 5)
+
+    def test_g_unirse_al_ultimo_cupo_justo_cuando_vence_el_plazo_y_el_barrido(self):
+        # El lobby termina COMPLETO o CANCELADO, nunca CANCELADO con 4 inscriptos.
+        for ronda in range(5):
+            with self.subTest(ronda=ronda):
+                turno = self.nuevo_turno(dias=20 + ronda, hora=9)
+                lobby = Lobby.crear(turno, self.jugador(f"cap_v{ronda}"))
+                for nombre in ("j2", "j3"):
+                    lobby.inscribir(self.jugador(f"{nombre}_v{ronda}"))
+                ultimo = self.jugador(f"ultimo_v{ronda}")
+                Lobby.objects.filter(pk=lobby.pk).update(
+                    plazo_limite=timezone.now() + timedelta(milliseconds=150)
+                )
+
+                def unirse(lobby=lobby, ultimo=ultimo):
+                    sleep(0.1)
+                    return Lobby.objects.get(pk=lobby.pk).inscribir(ultimo)
+
+                def barrer(lobby=lobby):
+                    sleep(0.16)
+                    return Lobby.objects.get(pk=lobby.pk).vencer_si_corresponde()
+
+                resultados = self.en_paralelo([unirse, barrer])
+
+                self.assertEqual([r[1] for r in resultados if r[0] == "error"], [])
+                lobby.refresh_from_db()
+                inscriptos = lobby.inscripciones.count()
+                if lobby.estado == Lobby.Estado.COMPLETO:
+                    self.assertEqual(inscriptos, 4)
+                else:
+                    self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
+                    self.assertLess(inscriptos, 4)

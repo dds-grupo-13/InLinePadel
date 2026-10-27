@@ -111,6 +111,8 @@ class InvitacionViewSet(
             raise Conflicto("Solo podés invitar a jugadores de tu lista de contactos.")
         if lobby.inscripciones.count() >= Lobby.CANTIDAD_CUPOS:
             raise Conflicto("El partido ya está completo.")
+        if lobby.vencer_si_corresponde():
+            raise Conflicto("Venció el plazo para completar la partida.")
         invitacion = serializer.save(emisor=self.jugador)
         notificar(
             [receptor.usuario_id],
@@ -127,6 +129,9 @@ class InvitacionViewSet(
     @action(detail=True, methods=["post"])
     def aceptar(self, request, pk=None):
         invitacion = self._como_receptor()
+        if not invitacion.es_cesion and invitacion.lobby.vencer_si_corresponde():
+            # El vencimiento ya la dejó EXPIRADA (_expirar_pendientes).
+            raise Conflicto("Venció el plazo para completar la partida.")
         try:
             with transaction.atomic():
                 invitacion.aceptar()

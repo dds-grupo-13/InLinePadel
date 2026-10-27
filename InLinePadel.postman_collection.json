@@ -1657,6 +1657,28 @@
               }
             },
             {
+              "name": "Unirse a lobby vencido (409)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{lobby_id}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{lobby_id}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "description": "El seed deja plazo_limite en el futuro: para probarlo hay que vencer el lobby a mano. En el shell (python manage.py shell): from partidas.models import Lobby; from django.utils import timezone; from datetime import timedelta; Lobby.objects.filter(pk=<lobby_id>).update(plazo_limite=timezone.now()-timedelta(minutes=1)). Con el plazo vencido responde 409, el lobby queda CANCELADO por VENCIMIENTO y el turno LIBRE, aunque vencer_lobbies no haya corrido."
+              }
+            },
+            {
               "name": "Abandonar",
               "request": {
                 "method": "POST",

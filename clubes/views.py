@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -129,17 +129,21 @@ class TurnoViewSet(viewsets.ModelViewSet):
         return [EsAdminClub()]
 
     def get_queryset(self):
-        qs = Turno.objects.con_cancha()
+        ahora = timezone.now()
+        vencido = Lobby.objects.filter(Lobby.q_vencido(ahora), turno=OuterRef("pk"))
+        qs = Turno.objects.con_cancha().annotate(liberable=Exists(vencido))
         user = self.request.user
         if user.is_superuser:
             return qs
         if user.is_staff:
             return qs.filter(cancha__club__admin=user)
+        # Un turno bloqueado por un lobby vencido ya está libre para el jugador.
         return qs.filter(
-            estado=Turno.Estado.LIBRE,
+            Q(estado=Turno.Estado.LIBRE)
+            | Q(estado=Turno.Estado.BLOQUEADO, liberable=True),
             cancha__activa=True,
             cancha__club__estado=Club.Estado.ACTIVO,
-            inicio__gt=timezone.now(),
+            inicio__gt=ahora,
         )
 
     def _verificar_editable(self, turno):
@@ -166,6 +170,8 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def no_disponible(self, request, pk=None):
+        # Si el turno lo bloquea un lobby vencido, se libera antes de retirarlo.
+        Lobby.vencer_del_turno(self.get_object())
         return self._transicion(
             Turno.Estado.LIBRE,
             Turno.Estado.NO_DISPONIBLE,

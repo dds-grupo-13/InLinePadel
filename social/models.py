@@ -88,6 +88,8 @@ class _PedidoLobby:
     def _validar_lobby_abierto(self):
         if self.lobby.estado != self.lobby.Estado.EN_FORMACION:
             raise ValidationError("El lobby no está en formación.")
+        if self.lobby.esta_vencido():
+            raise ValidationError("Venció el plazo para completar la partida.")
 
     def _validar_no_inscripto(self, jugador, campo):
         if self.lobby.inscripciones.filter(jugador=jugador).exists():

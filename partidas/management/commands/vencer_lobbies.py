@@ -9,23 +9,21 @@ from social.models import Invitacion
 
 class Command(BaseCommand):
     help = (
-        "Cancela los lobbies cuyo plazo venció sin completar cupos (liberando el "
-        "turno) y cierra las partidas cuyo turno ya pasó. Pensado para correr por cron."
+        "Barrido de limpieza: cancela y notifica los lobbies vencidos que nadie tocó "
+        "y cierra las partidas cuyo turno ya pasó. La regla del plazo se aplica "
+        "también en cada pedido. Pensado para correr por cron."
     )
 
     def handle(self, *args, **options):
         ahora = timezone.now()
 
-        vencidos = Lobby.objects.filter(
-            estado=Lobby.Estado.EN_FORMACION, plazo_limite__lt=ahora
-        ).select_related("turno__cancha__club")
+        vencidos = Lobby.objects.filter(Lobby.q_vencido(ahora)).select_related(
+            "turno__cancha__club"
+        )
         cancelados = 0
         for lobby in vencidos:
-            try:
-                lobby._cancelar(Lobby.CanceladaPor.VENCIMIENTO)
+            if lobby.vencer_si_corresponde(ahora):
                 cancelados += 1
-            except ValueError:
-                continue
 
         # Las cesiones pendientes de partidas que ya se jugaron pierden sentido.
         Invitacion.objects.filter(

@@ -76,13 +76,15 @@ class LobbyViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
+        ahora = timezone.now()
         return self._queryset_base().filter(
             Q(es_mio=True)
             | Q(tiene_cesion=True)
             | (
                 Q(
                     estado=Lobby.Estado.EN_FORMACION,
-                    turno__inicio__gt=timezone.now(),
+                    plazo_limite__gte=ahora,
+                    turno__inicio__gt=ahora,
                     turno__cancha__club__estado=Club.Estado.ACTIVO,
                 )
                 & (Q(privacidad=Lobby.Privacidad.PUBLICO) | Q(es_invitado=True))
@@ -105,6 +107,13 @@ class LobbyViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(self.request, lobby)
         return lobby
 
+    def _vencer_o_409(self, lobby):
+        # Antes de cualquier `atomic` de la vista: si no, el 409 revertiría el vencimiento.
+        if lobby.vencer_si_corresponde():
+            raise Conflicto(
+                "Venció el plazo para completar la partida: se canceló y el turno quedó libre."
+            )
+
     def _responder(self, lobby, codigo=status.HTTP_200_OK):
         lobby = self.get_queryset().get(pk=lobby.pk)
         return Response(self.get_serializer(lobby).data, status=codigo)
@@ -123,6 +132,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         lobby = serializer.instance
         self._exigir_capitan(lobby)
+        self._vencer_o_409(lobby)
         if lobby.estado != Lobby.Estado.EN_FORMACION:
             raise Conflicto("Solo se puede modificar una partida en formación.")
         serializer.save()
@@ -180,6 +190,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
     def cancelar(self, request, *args, **kwargs):
         lobby = self.get_object()
         self._exigir_capitan(lobby)
+        self._vencer_o_409(lobby)
         try:
             lobby.cancelar_por_capitan(request.user.jugador)
         except Conflicto:
@@ -191,6 +202,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def unirse(self, request, pk=None):
         lobby = self._lobby_para_unirse()
+        self._vencer_o_409(lobby)
         jugador = request.user.jugador
         if lobby.inscripciones.filter(jugador=jugador).exists():
             return Response(
@@ -277,6 +289,7 @@ class LobbyViewSet(viewsets.ModelViewSet):
     def abandonar(self, request, pk=None):
         lobby = self.get_object()
         jugador = request.user.jugador
+        self._vencer_o_409(lobby)
         lobby.abandonar(jugador)
         otros = list(
             lobby.inscripciones.values_list("jugador__usuario_id", flat=True)

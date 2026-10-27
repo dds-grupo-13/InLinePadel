@@ -114,15 +114,24 @@ class TurnoSerializer(serializers.ModelSerializer):
     cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
     cancha_tipo = serializers.CharField(source="cancha.tipo", read_only=True)
     cierre = serializers.SerializerMethodField()
+    liberable = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Turno
         fields = [
             "id", "fecha", "hora_inicio", "duracion", "precio",
             "estado", "cancha", "inicio", "fin", "cierre",
-            "club", "club_nombre", "cancha_numero", "cancha_tipo",
+            "club", "club_nombre", "cancha_numero", "cancha_tipo", "liberable",
         ]
         read_only_fields = ["inicio", "fin", "estado"]
+
+    def to_representation(self, turno):
+        datos = super().to_representation(turno)
+        request = self.context.get("request")
+        es_staff = getattr(getattr(request, "user", None), "is_staff", False)
+        if datos.get("liberable") and not es_staff:
+            datos["estado"] = Turno.Estado.LIBRE.value
+        return datos
 
     def get_cierre(self, turno):
         from partidas.models import Lobby
@@ -170,6 +179,7 @@ class TurnoOcupacionSerializer(serializers.ModelSerializer):
         return {
             "id": lobby.pk,
             "estado": lobby.estado,
+            "vencido": lobby.esta_vencido(),
             "privacidad": lobby.privacidad,
             "cupos_ocupados": len(lobby.inscripciones.all()),
             "reserva": lobby.estado_reserva,

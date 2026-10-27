@@ -629,3 +629,87 @@ class CierreReservaTests(LobbyBaseTestCase):
         lobby.refresh_from_db()
         self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
         self.assertEqual(lobby.cancelada_por, Lobby.CanceladaPor.VENCIMIENTO)
+
+
+class LobbyVencimientoTests(LobbyBaseTestCase):
+    def vencer(self, lobby):
+        Lobby.objects.filter(pk=lobby.pk).update(
+            plazo_limite=timezone.now() - timedelta(minutes=1)
+        )
+        lobby.refresh_from_db()
+
+    def test_esta_vencido_y_q_vencido(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.assertFalse(lobby.esta_vencido())
+        self.vencer(lobby)
+        self.assertTrue(lobby.esta_vencido())
+        self.assertEqual(list(Lobby.objects.filter(Lobby.q_vencido())), [lobby])
+
+    def test_lobby_completo_nunca_esta_vencido(self):
+        lobby = self.lobby_completo()
+        self.vencer(lobby)
+        self.assertFalse(lobby.esta_vencido())
+        self.assertFalse(Lobby.objects.filter(Lobby.q_vencido()).exists())
+
+    def test_vencer_si_corresponde_cancela_libera_y_notifica(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        invitacion = Invitacion.objects.create(
+            lobby=lobby, emisor=self.capitan, receptor=self.jugador("amigo")
+        )
+        self.vencer(lobby)
+        Notificacion.objects.all().delete()
+        self.assertTrue(lobby.vencer_si_corresponde())
+        self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
+        self.assertEqual(lobby.cancelada_por, Lobby.CanceladaPor.VENCIMIENTO)
+        self.turno_libre.refresh_from_db()
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.LIBRE)
+        invitacion.refresh_from_db()
+        self.assertEqual(invitacion.estado, Invitacion.Estado.EXPIRADA)
+        destinatarios = set(Notificacion.objects.values_list("usuario_id", flat=True))
+        self.assertEqual(
+            destinatarios, {self.capitan.usuario_id, self.turno_libre.cancha.club.admin_id}
+        )
+        self.assertTrue(Notificacion.objects.filter(mensaje__contains="Venció el plazo").exists())
+
+    def test_vencer_si_corresponde_en_lobby_vigente_no_hace_nada(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.assertFalse(lobby.vencer_si_corresponde())
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.EN_FORMACION)
+
+    def test_vencer_si_corresponde_rechequea_bajo_lock(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.vencer(lobby)
+        # Otro proceso lo completó: la instancia en memoria quedó desactualizada.
+        Lobby.objects.filter(pk=lobby.pk).update(estado=Lobby.Estado.COMPLETO)
+        self.assertFalse(lobby.vencer_si_corresponde())
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
+
+    def test_inscribir_en_lobby_vencido_da_conflicto(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.vencer(lobby)
+        with self.assertRaises(Conflicto):
+            lobby.inscribir(self.jugador("tarde"))
+        self.assertEqual(lobby.inscripciones.count(), 1)
+
+    def test_crear_sobre_turno_bloqueado_por_lobby_vencido(self):
+        viejo = Lobby.crear(self.turno_libre, self.capitan)
+        self.vencer(viejo)
+        nuevo = Lobby.crear(self.turno_libre, self.jugador("nuevo"))
+        viejo.refresh_from_db()
+        self.assertEqual(viejo.estado, Lobby.Estado.CANCELADO)
+        self.assertEqual(viejo.cancelada_por, Lobby.CanceladaPor.VENCIMIENTO)
+        self.assertEqual(nuevo.estado, Lobby.Estado.EN_FORMACION)
+
+    def test_lobby_vencido_no_cuenta_para_el_limite_de_en_formacion(self):
+        primero = Lobby.crear(self.turno_libre, self.capitan)
+        Lobby.crear(self.turno(self.cancha, dias=3, hora=10), self.capitan)
+        self.vencer(primero)
+        Lobby.crear(self.turno(self.cancha, dias=4, hora=10), self.capitan)
+
+    def test_conflicto_horario_ignora_lobbies_vencidos(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.assertIsNotNone(Lobby.conflicto_horario(self.capitan, self.turno_libre))
+        self.vencer(lobby)
+        self.assertIsNone(Lobby.conflicto_horario(self.capitan, self.turno_libre))

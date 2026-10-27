@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate
+from django.core.cache import caches
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -21,37 +22,61 @@ from .serializers import (
 
 
 class LoginRateThrottle(SimpleRateThrottle):
+    """Limita solo los intentos fallidos, por IP y usuario.
+
+    Un login correcto no cuenta (y reinicia el contador), y los intentos de
+    otros usuarios desde la misma IP no se pisan entre sí.
+    """
+
     scope = "login"
     cache_key_prefix = "login"
     MAX_INTENTOS = 10
     VENTANA_SEGUNDOS = 15 * 60
 
-    def get_rate(self):
-        return f"{self.MAX_INTENTOS} cada {self.VENTANA_SEGUNDOS // 60} minutos"
-
-    def parse_rate(self, rate):
-        return self.MAX_INTENTOS, self.VENTANA_SEGUNDOS
-
-    def get_cache_key(self, request, view):
-        return self.cache_format % {
+    def __init__(self, request, username):
+        self.key = self.cache_format % {
             "scope": self.scope,
-            "ident": self.get_ident(request),
+            "ident": f"{self.get_ident(request)}:{username.strip().lower()}",
         }
+        self.cache = caches["default"]
+
+    def bloqueado(self):
+        return self.cache.get(self.key, 0) >= self.MAX_INTENTOS
+
+    def registrar_fallo(self):
+        if self.cache.add(self.key, 1, self.VENTANA_SEGUNDOS):
+            return
+        try:
+            self.cache.incr(self.key)
+        except ValueError:
+            self.cache.set(self.key, 1, self.VENTANA_SEGUNDOS)
+
+    def reiniciar(self):
+        self.cache.delete(self.key)
 
 
 class AuthViewSet(viewsets.ViewSet):
     permission_classes = [AllowAny]
 
-    @action(detail=False, methods=["post"], throttle_classes=[LoginRateThrottle])
+    @action(detail=False, methods=["post"], throttle_classes=[])
     def login(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        limite = LoginRateThrottle(request, serializer.validated_data["username"])
+        if limite.bloqueado():
+            return Response(
+                {"detail": "Demasiados intentos fallidos. Probá de nuevo en unos minutos."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(limite.VENTANA_SEGUNDOS)},
+            )
         usuario = authenticate(request, **serializer.validated_data)
         if usuario is None:
+            limite.registrar_fallo()
             return Response(
                 {"detail": "Usuario o contraseña incorrectos."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        limite.reiniciar()
         refresh = RefreshToken.for_user(usuario)
         return Response(
             {

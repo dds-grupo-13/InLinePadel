@@ -9,6 +9,7 @@ from config.exceptions import Conflicto, ErrorDominio
 
 
 ESTADO_CANCELADO = "CANCELADO"
+ESTADO_EN_FORMACION = "EN_FORMACION"
 
 class Lobby(models.Model):
     CANTIDAD_CUPOS = 4
@@ -108,6 +109,41 @@ class Lobby(models.Model):
             raise ValidationError("El check-in debe ser anterior al inicio del turno.")
 
 
+    @staticmethod
+    def q_vencido(ahora=None):
+        return models.Q(
+            estado=ESTADO_EN_FORMACION, plazo_limite__lt=ahora or timezone.now()
+        )
+
+    def esta_vencido(self, ahora=None):
+        return self.estado == ESTADO_EN_FORMACION and self.plazo_limite < (
+            ahora or timezone.now()
+        )
+
+    def vencer_si_corresponde(self, ahora=None):
+        """Cancela por VENCIMIENTO si el plazo ya pasó. Devuelve True si lo hizo.
+
+        No llamarlo dentro de una transacción externa que después se revierta:
+        si la vista lanza 409 dentro del mismo `atomic`, el vencimiento se pierde.
+        Por eso las vistas lo llaman antes de abrir su propia transacción.
+        """
+        if not self.esta_vencido(ahora):
+            return False
+        vencido = False
+        with transaction.atomic():
+            lobby = Lobby.objects.select_for_update().get(pk=self.pk)
+            # Otro proceso pudo haberlo completado, cancelado o vencido ya.
+            if lobby.esta_vencido(ahora):
+                self._cancelar(self.CanceladaPor.VENCIMIENTO)
+                vencido = True
+        self.refresh_from_db(fields=["estado", "cancelada_por"])
+        return vencido
+
+    @classmethod
+    def vencer_del_turno(cls, turno, ahora=None):
+        lobby = cls.objects.filter(cls.q_vencido(ahora), turno=turno).first()
+        return lobby is not None and lobby.vencer_si_corresponde(ahora)
+
     @property
     def estado_reserva(self):
         return {
@@ -146,7 +182,7 @@ class Lobby(models.Model):
             estado__in=(cls.Estado.EN_FORMACION, cls.Estado.COMPLETO),
             turno__inicio__lt=turno.fin,
             turno__fin__gt=turno.inicio,
-        )
+        ).exclude(cls.q_vencido())
         if excluir_lobby is not None:
             vigentes = vigentes.exclude(pk=excluir_lobby)
         return vigentes.select_related("turno").first()
@@ -172,11 +208,16 @@ class Lobby(models.Model):
         if turno.inicio <= timezone.now():
             raise ErrorDominio("El turno ya comenzó o ya pasó.")
         with transaction.atomic():
+            # Primero el lock del lobby viejo y después el del jugador (mismo
+            # orden que `inscribir`).
+            cls.vencer_del_turno(turno, ahora)
             Jugador = cls._meta.get_field("capitan").related_model
             Jugador.objects.select_for_update().filter(pk=capitan.pk).first()
-            en_formacion = cls.objects.filter(
-                capitan=capitan, estado=cls.Estado.EN_FORMACION
-            ).count()
+            en_formacion = (
+                cls.objects.filter(capitan=capitan, estado=cls.Estado.EN_FORMACION)
+                .exclude(plazo_limite__lt=ahora)
+                .count()
+            )
             if en_formacion >= cls.MAX_LOBBIES_EN_FORMACION:
                 raise ErrorDominio(
                     f"Ya sos capitán de {cls.MAX_LOBBIES_EN_FORMACION} partidas en formación. "
@@ -236,6 +277,8 @@ class Lobby(models.Model):
                     )
                 if lobby.estado != self.Estado.EN_FORMACION:
                     raise Conflicto("La partida ya no está abierta a nuevos jugadores.")
+                if lobby.esta_vencido():
+                    raise Conflicto("Venció el plazo para completar esta partida.")
                 ocupados = set(
                     Inscripcion.objects.filter(lobby_id=self.pk).values_list(
                         "numero_cupo", flat=True
@@ -412,6 +455,14 @@ class Lobby(models.Model):
             )
             return
         usuarios.append(turno.cancha.club.admin_id)
+        if por == self.CanceladaPor.VENCIMIENTO:
+            notificar(
+                usuarios,
+                f"Venció el plazo de la partida del {turno.fecha:%d/%m} a las "
+                f"{turno.hora_inicio:%H:%M} sin completar los cupos: se canceló "
+                "y el turno quedó libre.",
+            )
+            return
         notificar(
             usuarios,
             f"Se canceló la partida del {turno.fecha:%d/%m} a las "
