@@ -97,3 +97,87 @@ class ClubesAPITests(BaseAPITestCase):
         )
         self.assertEqual(r.status_code, 400)
         self.assertEqual(Turno.objects.count(), 0)
+
+
+class CancelarPorClubTests(BaseAPITestCase):
+    MOTIVO = {"motivo": "Lluvia: cancha descubierta inhabilitada"}
+
+    def url(self, turno):
+        return f"/api/clubes/turnos/{turno.pk}/cancelar_por_club/"
+
+    def partida(self, completa=False):
+        from partidas.models import Lobby
+
+        turno = self.turno(self.cancha)
+        lobby = Lobby.crear(turno, self.jugador("cap"))
+        if completa:
+            for nombre in ("j2", "j3", "j4"):
+                lobby.inscribir(self.jugador(nombre))
+        return turno, lobby
+
+    def test_cancela_una_partida_en_formacion(self):
+        from social.models import Notificacion
+
+        turno, lobby = self.partida()
+        self.login(self.admin)
+        r = self.client.post(self.url(turno), self.MOTIVO, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["estado"], "NO_DISPONIBLE")
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, "CANCELADO")
+        self.assertEqual(lobby.cancelada_por, "CLUB")
+        self.assertEqual(lobby.motivo_cancelacion, self.MOTIVO["motivo"])
+        mensaje = Notificacion.objects.get(usuario__username="cap", mensaje__contains="Club A").mensaje
+        self.assertIn(self.MOTIVO["motivo"], mensaje)
+        self.assertIn("canceló la partida", mensaje)
+
+    def test_cancela_una_partida_firme_y_avisa_a_los_cuatro(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from social.models import Notificacion
+
+        turno, lobby = self.partida(completa=True)
+        inicio = timezone.now() + timedelta(hours=2)
+        Turno.objects.filter(pk=turno.pk).update(inicio=inicio, fin=inicio + timedelta(minutes=90))
+        self.login(self.admin)
+        r = self.client.post(self.url(turno), self.MOTIVO, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, "CANCELADO")
+        avisados = Notificacion.objects.filter(mensaje__contains="canceló la partida")
+        self.assertEqual(avisados.count(), 4)
+        self.assertEqual(
+            self.client.post(f"/api/clubes/turnos/{turno.pk}/disponible/").status_code, 200
+        )
+
+    def test_admin_de_otro_club_recibe_404(self):
+        turno, _ = self.partida()
+        self.login(self.otro_admin)
+        self.assertEqual(self.client.post(self.url(turno), self.MOTIVO, format="json").status_code, 404)
+
+    def test_jugador_no_puede(self):
+        turno, _ = self.partida()
+        self.login(self.jugador("curioso").usuario)
+        self.assertEqual(self.client.post(self.url(turno), self.MOTIVO, format="json").status_code, 403)
+
+    def test_sin_partida_da_409(self):
+        turno = self.turno(self.cancha, hora=10)
+        self.login(self.admin)
+        r = self.client.post(self.url(turno), self.MOTIVO, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("No disponible", r.data["detail"])
+
+    def test_turno_pasado_da_400(self):
+        turno = self.turno(self.cancha, dias=-2)
+        self.login(self.admin)
+        self.assertEqual(self.client.post(self.url(turno), self.MOTIVO, format="json").status_code, 400)
+
+    def test_motivo_obligatorio_y_acotado(self):
+        turno, lobby = self.partida()
+        self.login(self.admin)
+        for cuerpo in ({}, {"motivo": "abc"}, {"motivo": "x" * 201}):
+            self.assertEqual(self.client.post(self.url(turno), cuerpo, format="json").status_code, 400)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, "EN_FORMACION")

@@ -106,12 +106,7 @@ class InvitacionViewSet(
     def perform_create(self, serializer):
         receptor = serializer.validated_data["receptor"]
         lobby = serializer.validated_data["lobby"]
-        es_contacto = Contacto.objects.filter(
-            estado=Contacto.Estado.ACEPTADO
-        ).filter(
-            Q(jugador=self.jugador, contacto=receptor)
-            | Q(jugador=receptor, contacto=self.jugador)
-        ).exists()
+        es_contacto = Contacto.son_contactos(self.jugador, receptor)
         if not es_contacto:
             raise Conflicto("Solo podés invitar a jugadores de tu lista de contactos.")
         if lobby.inscripciones.count() >= Lobby.CANTIDAD_CUPOS:

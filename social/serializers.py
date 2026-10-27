@@ -44,7 +44,14 @@ class SolicitudAccesoSerializer(_PedidoLobbySerializer):
 
 
 class InvitacionSerializer(_PedidoLobbySerializer):
+    tipo = serializers.SerializerMethodField()
+
     class Meta:
         model = Invitacion
-        fields = ["id", "lobby", "emisor", "receptor", "estado", "fecha"]
-        read_only_fields = ["emisor", "estado", "fecha"]
+        fields = [
+            "id", "lobby", "emisor", "receptor", "estado", "fecha", "tipo", "reemplaza",
+        ]
+        read_only_fields = ["emisor", "estado", "fecha", "reemplaza"]
+
+    def get_tipo(self, invitacion):
+        return "CESION" if invitacion.es_cesion else "INVITACION"

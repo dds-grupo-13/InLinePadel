@@ -199,7 +199,7 @@ class ConflictoHorarioTests(LobbyBaseTestCase):
 
     def test_ignora_lobbies_cancelados(self):
         lobby = Lobby.crear(self.turno_libre, self.capitan)
-        lobby.cancelar()
+        lobby.cancelar_por_capitan(lobby.capitan)
         self.assertIsNone(Lobby.conflicto_horario(self.capitan, self.turno_libre))
 
     def test_excluir_lobby(self):
@@ -268,7 +268,7 @@ class LobbyInscribirTests(LobbyBaseTestCase):
         )
 
     def test_lobby_cancelado_no_acepta_jugadores(self):
-        self.lobby.cancelar()
+        self.lobby.cancelar_por_capitan(self.lobby.capitan)
         with self.assertRaises(Conflicto):
             self.lobby.inscribir(self.jugador("j2"))
 
@@ -339,7 +339,7 @@ class LobbyAbandonarTests(LobbyBaseTestCase):
             self.lobby.abandonar(self.jugador("ajeno"))
 
     def test_lobby_cancelado_no_se_abandona(self):
-        self.lobby.cancelar()
+        self.lobby.cancelar_por_capitan(self.lobby.capitan)
         with self.assertRaises(ErrorDominio):
             self.lobby.abandonar(self.j2)
 
@@ -382,7 +382,7 @@ class LobbyAbandonarTests(LobbyBaseTestCase):
 class LobbyCancelarTests(LobbyBaseTestCase):
     def test_cancelar_libera_el_turno_y_notifica(self):
         lobby = Lobby.crear(self.turno_libre, self.capitan)
-        lobby.cancelar()
+        lobby.cancelar_por_capitan(lobby.capitan)
         lobby.refresh_from_db()
         self.turno_libre.refresh_from_db()
         self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
@@ -391,17 +391,32 @@ class LobbyCancelarTests(LobbyBaseTestCase):
             Notificacion.objects.filter(usuario=self.capitan.usuario, mensaje__contains="Se canceló").exists()
         )
 
-    def test_cancelar_un_lobby_completo_libera_el_turno_confirmado(self):
+    def test_el_capitan_no_puede_cancelar_un_lobby_completo(self):
         lobby = self.lobby_completo()
-        lobby.cancelar()
+        with self.assertRaises(Conflicto) as ctx:
+            lobby.cancelar_por_capitan(self.capitan)
+        self.assertIn("bajarse hasta el", str(ctx.exception))
+        lobby.refresh_from_db()
         self.turno_libre.refresh_from_db()
-        self.assertEqual(self.turno_libre.estado, Turno.Estado.LIBRE)
+        self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.CONFIRMADO)
+
+    def test_solo_el_capitan_cancela(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        with self.assertRaises(ErrorDominio):
+            lobby.cancelar_por_capitan(self.jugador("otro"))
+
+    def test_cancelar_registra_quien_cancelo(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        lobby.cancelar_por_capitan(self.capitan)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.cancelada_por, Lobby.CanceladaPor.CAPITAN)
 
     def test_cancelar_dos_veces_da_error(self):
         lobby = Lobby.crear(self.turno_libre, self.capitan)
-        lobby.cancelar()
+        lobby.cancelar_por_capitan(lobby.capitan)
         with self.assertRaises(ErrorDominio):
-            lobby.cancelar()
+            lobby.cancelar_por_capitan(lobby.capitan)
 
     def test_cancelar_vence_invitaciones_y_solicitudes_pendientes(self):
         lobby = Lobby.crear(
@@ -410,12 +425,13 @@ class LobbyCancelarTests(LobbyBaseTestCase):
         invitacion = Invitacion.objects.create(
             lobby=lobby, emisor=self.capitan, receptor=self.jugador("inv")
         )
-        lobby.cancelar()
+        lobby.cancelar_por_capitan(lobby.capitan)
         invitacion.refresh_from_db()
         self.assertEqual(invitacion.estado, Invitacion.Estado.EXPIRADA)
 
     def test_turno_cancelado_puede_reservarse_de_nuevo(self):
-        Lobby.crear(self.turno_libre, self.capitan).cancelar()
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        lobby.cancelar_por_capitan(self.capitan)
         nuevo = Lobby.crear(self.turno_libre, self.jugador("otro"))
         self.assertEqual(nuevo.estado, Lobby.Estado.EN_FORMACION)
 
@@ -476,3 +492,140 @@ class LobbyConstraintsTests(LobbyBaseTestCase):
                 plazo_limite=inicio,
                 fecha_check_in=inicio - timedelta(minutes=1),
             )
+
+
+def acercar_inicio(lobby, horas):
+    """Mueve el inicio del turno a `horas` desde ahora (sin pasar por Turno.save)."""
+    inicio = timezone.now() + timedelta(hours=horas)
+    Turno.objects.filter(pk=lobby.turno_id).update(
+        inicio=inicio, fin=inicio + timedelta(minutes=90)
+    )
+    lobby.turno.refresh_from_db()
+
+
+class CierreReservaTests(LobbyBaseTestCase):
+    def turno_en(self, horas):
+        ahora = timezone.localtime() + timedelta(hours=horas)
+        return Turno.objects.create(
+            cancha=self.cancha, fecha=ahora.date(),
+            hora_inicio=ahora.time().replace(second=0, microsecond=0), precio=4000,
+        )
+
+    def test_cierre_es_tres_horas_antes_del_inicio(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        self.assertEqual(lobby.cierre, self.turno_libre.inicio - timedelta(hours=3))
+        self.assertEqual(Lobby.cierre_de(self.turno_libre), lobby.cierre)
+
+    def test_plazo_al_crear_no_supera_el_cierre(self):
+        turno = self.turno_en(10)
+        lobby = Lobby.crear(turno, self.capitan)
+        self.assertLessEqual(lobby.plazo_limite, lobby.cierre)
+        self.assertAlmostEqual(
+            lobby.plazo_limite.timestamp(), lobby.cierre.timestamp(), delta=1
+        )
+
+    def test_partida_de_ultimo_momento_tiene_plazo_hasta_el_inicio(self):
+        turno = self.turno_en(2)
+        lobby = Lobby.crear(turno, self.capitan)
+        self.assertEqual(lobby.plazo_limite, turno.inicio)
+
+    def test_ultimo_momento_queda_firme_al_completarse(self):
+        lobby = Lobby.crear(self.turno_en(2), self.capitan)
+        for nombre in ("j2", "j3", "j4"):
+            lobby.inscribir(self.jugador(nombre))
+        lobby.refresh_from_db()
+        self.assertTrue(lobby.es_firme())
+
+    def test_es_firme_depende_del_estado_y_del_momento(self):
+        lobby = self.lobby_completo()
+        self.assertFalse(lobby.es_firme())
+        self.assertTrue(lobby.es_firme(ahora=lobby.cierre))
+        self.assertFalse(lobby.es_firme(ahora=lobby.cierre - timedelta(seconds=1)))
+        en_formacion = Lobby.crear(self.turno(self.cancha, dias=9, hora=10), self.jugador("c2"))
+        self.assertFalse(en_formacion.es_firme(ahora=en_formacion.cierre + timedelta(hours=1)))
+
+    def test_puede_cancelar_y_puede_abandonar(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        j2 = self.jugador("j2")
+        lobby.inscribir(j2)
+        ajeno = self.jugador("ajeno")
+        self.assertTrue(lobby.puede_cancelar(self.capitan))
+        self.assertFalse(lobby.puede_cancelar(j2))
+        self.assertTrue(lobby.puede_abandonar(j2))
+        self.assertFalse(lobby.puede_abandonar(ajeno))
+        for nombre in ("j3", "j4"):
+            lobby.inscribir(self.jugador(nombre))
+        self.assertFalse(lobby.puede_cancelar(self.capitan))
+        self.assertTrue(lobby.puede_abandonar(j2))
+        self.assertFalse(lobby.puede_abandonar(j2, ahora=lobby.cierre))
+
+    def test_bajarse_antes_del_cierre_reabre_y_avisa_al_club(self):
+        lobby = self.lobby_completo()
+        j2 = Inscripcion.objects.get(lobby=lobby, numero_cupo=2).jugador
+        Notificacion.objects.all().delete()
+        lobby.abandonar(j2)
+        lobby.refresh_from_db()
+        self.turno_libre.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.EN_FORMACION)
+        self.assertEqual(lobby.estado_reserva, "PROVISORIA")
+        self.assertIsNone(lobby.codigo_reserva)
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.BLOQUEADO)
+        self.assertLessEqual(lobby.plazo_limite, lobby.cierre)
+        self.assertTrue(
+            Notificacion.objects.filter(
+                usuario=self.admin, mensaje__contains="volvió a provisoria"
+            ).exists()
+        )
+
+    def test_reapertura_cerca_del_cierre_no_pasa_del_cierre(self):
+        lobby = self.lobby_completo()
+        acercar_inicio(lobby, 4)  # cierre en 1 h: menos que las 12 h de reapertura
+        lobby = Lobby.objects.get(pk=lobby.pk)
+        j2 = Inscripcion.objects.get(lobby=lobby, numero_cupo=2).jugador
+        lobby.abandonar(j2)
+        lobby.refresh_from_db()
+        self.assertLessEqual(lobby.plazo_limite, lobby.cierre)
+
+    def test_no_se_puede_bajar_de_una_reserva_firme(self):
+        lobby = self.lobby_completo()
+        acercar_inicio(lobby, 2)
+        lobby = Lobby.objects.get(pk=lobby.pk)
+        j2 = Inscripcion.objects.get(lobby=lobby, numero_cupo=2).jugador
+        with self.assertRaises(Conflicto) as ctx:
+            lobby.abandonar(j2)
+        self.assertIn("ya es firme", str(ctx.exception))
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.COMPLETO)
+        self.assertEqual(lobby.inscripciones.count(), 4)
+        self.assertIsNotNone(lobby.codigo_reserva)
+
+    def test_el_capitan_tampoco_cancela_una_reserva_firme(self):
+        lobby = self.lobby_completo()
+        acercar_inicio(lobby, 2)
+        lobby = Lobby.objects.get(pk=lobby.pk)
+        with self.assertRaises(Conflicto) as ctx:
+            lobby.cancelar_por_capitan(self.capitan)
+        self.assertIn("ya es firme", str(ctx.exception))
+
+    def test_el_ultimo_que_sale_cancela_por_abandono(self):
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        lobby.abandonar(self.capitan)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
+        self.assertEqual(lobby.cancelada_por, Lobby.CanceladaPor.ABANDONO)
+        self.turno_libre.refresh_from_db()
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.LIBRE)
+
+    def test_vencer_lobbies_marca_vencimiento(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        lobby = Lobby.crear(self.turno_libre, self.capitan)
+        Lobby.objects.filter(pk=lobby.pk).update(
+            plazo_limite=timezone.now() - timedelta(minutes=1)
+        )
+        call_command("vencer_lobbies", stdout=StringIO())
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, Lobby.Estado.CANCELADO)
+        self.assertEqual(lobby.cancelada_por, Lobby.CanceladaPor.VENCIMIENTO)

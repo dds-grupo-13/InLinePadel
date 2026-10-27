@@ -2,6 +2,8 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models, transaction
 from django.utils import timezone
 
+from config.exceptions import Conflicto
+
 
 class Usuario(AbstractUser):
     email = models.EmailField(unique=True)
@@ -40,11 +42,21 @@ class Jugador(models.Model):
         from social.notificaciones import notificar
 
         with transaction.atomic():
-            vigentes = Lobby.objects.filter(
-                inscripciones__jugador=self,
-                estado__in=(Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO),
-                turno__fin__gt=timezone.now(),
+            vigentes = list(
+                Lobby.objects.filter(
+                    inscripciones__jugador=self,
+                    estado__in=(Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO),
+                    turno__fin__gt=timezone.now(),
+                ).select_related("turno__cancha__club")
             )
+            for lobby in vigentes:
+                if lobby.es_firme():
+                    inicio = timezone.localtime(lobby.turno.inicio)
+                    raise Conflicto(
+                        "No podés dar de baja tu cuenta: tenés una reserva firme en "
+                        f"{lobby.turno.cancha.club.denominacion} el {inicio:%d/%m} "
+                        f"a las {inicio:%H:%M}."
+                    )
             for lobby in vigentes:
                 lobby.abandonar(self)
                 notificar(

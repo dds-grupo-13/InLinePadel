@@ -141,6 +141,44 @@ class UsuariosAPITests(BaseAPITestCase):
         self.assertEqual(SolicitudAcceso.objects.count(), 0)
 
 
+    def test_no_se_da_de_baja_con_una_reserva_firme(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from clubes.models import Turno
+        from partidas.models import Lobby
+
+        cap = self.jugador("cap")
+        lobby = Lobby.crear(self.turno(self.cancha), cap)
+        for nombre in ("j2", "j3", "j4"):
+            lobby.inscribir(self.jugador(nombre))
+        inicio = timezone.now() + timedelta(hours=2)
+        Turno.objects.filter(pk=lobby.turno_id).update(
+            inicio=inicio, fin=inicio + timedelta(minutes=90)
+        )
+
+        self.login(cap.usuario)
+        r = self.client.delete(f"/api/usuarios/jugadores/{cap.pk}/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertIn("Club A", r.data["detail"])
+        cap.usuario.refresh_from_db()
+        self.assertTrue(cap.usuario.is_active)
+        self.assertTrue(lobby.inscripciones.filter(jugador=cap).exists())
+
+    def test_baja_con_reserva_no_firme_se_baja_de_la_partida(self):
+        from partidas.models import Lobby
+
+        cap = self.jugador("cap")
+        lobby = Lobby.crear(self.turno(self.cancha), cap)
+        for nombre in ("j2", "j3", "j4"):
+            lobby.inscribir(self.jugador(nombre))
+        self.login(cap.usuario)
+        self.assertEqual(self.client.delete(f"/api/usuarios/jugadores/{cap.pk}/").status_code, 204)
+        lobby.refresh_from_db()
+        self.assertEqual(lobby.estado, "EN_FORMACION")
+
+
 class JWTTests(BaseAPITestCase):
     ME = "/api/usuarios/jugadores/me/"
 

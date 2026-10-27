@@ -113,15 +113,21 @@ class TurnoSerializer(serializers.ModelSerializer):
     club_nombre = serializers.CharField(source="cancha.club.denominacion", read_only=True)
     cancha_numero = serializers.IntegerField(source="cancha.numero", read_only=True)
     cancha_tipo = serializers.CharField(source="cancha.tipo", read_only=True)
+    cierre = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
         fields = [
             "id", "fecha", "hora_inicio", "duracion", "precio",
-            "estado", "cancha", "inicio", "fin",
+            "estado", "cancha", "inicio", "fin", "cierre",
             "club", "club_nombre", "cancha_numero", "cancha_tipo",
         ]
         read_only_fields = ["inicio", "fin", "estado"]
+
+    def get_cierre(self, turno):
+        from partidas.models import Lobby
+
+        return serializers.DateTimeField().to_representation(Lobby.cierre_de(turno))
 
     def validate_cancha(self, cancha):
         _validar_club_propio(self.context["request"], cancha.club)
@@ -139,6 +145,10 @@ class TurnoSerializer(serializers.ModelSerializer):
         except DjangoValidationError as e:
             raise serializers.ValidationError(e.messages)
         return attrs
+
+
+class CancelacionClubSerializer(serializers.Serializer):
+    motivo = serializers.CharField(min_length=5, max_length=200)
 
 
 class TurnoOcupacionSerializer(serializers.ModelSerializer):

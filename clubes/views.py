@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from config.exceptions import Conflicto
+from config.exceptions import Conflicto, ErrorDominio
 from config.permissions import EsAdminClub, EsAdminSistema, SoloLecturaOAdminSistema
 from partidas.models import Lobby
 
@@ -15,6 +15,7 @@ from .filters import TurnoFilter
 from .models import Cancha, Club, Turno, Zona
 from .serializers import (
     CanchaSerializer,
+    CancelacionClubSerializer,
     ClubSerializer,
     TurnoOcupacionSerializer,
     TurnoSerializer,
@@ -178,6 +179,35 @@ class TurnoViewSet(viewsets.ModelViewSet):
             Turno.Estado.LIBRE,
             "Solo se puede volver a publicar un turno marcado como no disponible.",
         )
+
+    @action(detail=True, methods=["post"])
+    def cancelar_por_club(self, request, pk=None):
+        turno = self.get_object()
+        entrada = CancelacionClubSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        if turno.inicio <= timezone.now():
+            raise ErrorDominio("El turno ya comenzó o ya pasó.")
+        with transaction.atomic():
+            lobby = (
+                Lobby.objects.select_for_update()
+                .filter(
+                    turno=turno,
+                    estado__in=(Lobby.Estado.EN_FORMACION, Lobby.Estado.COMPLETO),
+                )
+                .first()
+            )
+            if lobby is None:
+                raise Conflicto(
+                    "Este turno no tiene una partida para cancelar; "
+                    "podés retirarlo con 'No disponible'."
+                )
+            lobby._cancelar(
+                Lobby.CanceladaPor.CLUB,
+                entrada.validated_data["motivo"],
+                Turno.Estado.NO_DISPONIBLE,
+            )
+        turno.refresh_from_db()
+        return Response(self.get_serializer(turno).data)
 
     @action(detail=False, methods=["post"])
     def crear_masivo(self, request):

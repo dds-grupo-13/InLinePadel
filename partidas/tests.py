@@ -118,6 +118,106 @@ class LobbyAPITests(BaseAPITestCase):
         self.assertEqual(detalle["mensaje_reserva"], "Partido jugado — reserva cumplida")
         self.assertEqual(detalle["codigo_reserva"], codigo)
 
+    def completar(self, turno):
+        cap = self.jugador("cap")
+        lobby_id = self.crear(cap, turno).data["id"]
+        jugadores = [self.jugador(n) for n in ("j2", "j3", "j4")]
+        for j in jugadores:
+            self.login(j.usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        return lobby_id, cap, jugadores
+
+    def test_capitan_no_cancela_una_partida_completa(self):
+        t = self.turno(self.cancha)
+        lobby_id, cap, _ = self.completar(t)
+        self.login(cap.usuario)
+        for r in (
+            self.client.post(f"{URL}{lobby_id}/cancelar/"),
+            self.client.delete(f"{URL}{lobby_id}/"),
+        ):
+            self.assertEqual(r.status_code, 409, r.data)
+            self.assertIn("bajarse hasta el", r.data["detail"])
+        t.refresh_from_db()
+        self.assertEqual(t.estado, "CONFIRMADO")
+
+    def test_bajarse_de_una_reserva_firme_da_409(self):
+        t = self.turno(self.cancha)
+        lobby_id, _, jugadores = self.completar(t)
+        inicio = timezone.now() + timedelta(hours=2)
+        Turno.objects.filter(pk=t.pk).update(inicio=inicio, fin=inicio + timedelta(minutes=90))
+        self.login(jugadores[0].usuario)
+        r = self.client.post(f"{URL}{lobby_id}/abandonar/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertIn("ya es firme", r.data["detail"])
+        self.assertEqual(Lobby.objects.get().inscripciones.count(), 4)
+
+    def test_flags_de_cierre_segun_rol_y_momento(self):
+        t = self.turno(self.cancha)
+        lobby_id, cap, jugadores = self.completar(t)
+
+        def detalle(usuario):
+            self.login(usuario)
+            return self.client.get(f"{URL}{lobby_id}/").data
+
+        d = detalle(cap.usuario)
+        self.assertFalse(d["reserva_firme"])
+        self.assertFalse(d["puede_cancelar"])  # completa: nadie cancela
+        self.assertTrue(d["puede_abandonar"])
+        self.assertTrue(d["aviso_cierre"].startswith("Podés bajarte hasta el "))
+        self.assertIn("cierre", d)
+
+        inicio = timezone.now() + timedelta(hours=2)
+        Turno.objects.filter(pk=t.pk).update(inicio=inicio, fin=inicio + timedelta(minutes=90))
+        d = detalle(jugadores[0].usuario)
+        self.assertTrue(d["reserva_firme"])
+        self.assertFalse(d["puede_abandonar"])
+        self.assertFalse(d["puede_cancelar"])
+        self.assertEqual(d["aviso_cierre"], "Reserva firme: ya no se puede bajar nadie.")
+
+    def test_flags_en_formacion_capitan_inscripto_y_ajeno(self):
+        t = self.turno(self.cancha)
+        cap, j2, ajeno = self.jugador("cap"), self.jugador("j2"), self.jugador("ajeno")
+        lobby_id = self.crear(cap, t).data["id"]
+        self.login(j2.usuario)
+        self.client.post(f"{URL}{lobby_id}/unirse/")
+
+        def flags(usuario):
+            self.login(usuario)
+            d = self.client.get(f"{URL}{lobby_id}/").data
+            return d["puede_cancelar"], d["puede_abandonar"], d["aviso_cierre"]
+
+        self.assertEqual(flags(cap.usuario), (True, True, None))
+        self.assertEqual(flags(j2.usuario), (False, True, None))
+        self.assertEqual(flags(ajeno.usuario), (False, False, None))
+
+    def test_aviso_y_cierre_de_una_partida_de_ultimo_momento(self):
+        ahora = timezone.localtime() + timedelta(hours=2)
+        t = Turno.objects.create(
+            cancha=self.cancha, fecha=ahora.date(),
+            hora_inicio=ahora.time().replace(second=0, microsecond=0), precio=4000,
+        )
+        d = self.crear(self.jugador("cap"), t).data
+        self.assertEqual(d["plazo_limite"][:16], d["fecha_check_in"][:16])
+        self.assertTrue(d["aviso_cierre"].startswith("Partida de último momento"))
+
+    def test_turno_expone_su_cierre(self):
+        t = self.turno(self.cancha)
+        self.login(self.jugador("a").usuario)
+        r = self.client.get(f"/api/clubes/turnos/{t.pk}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("cierre", r.data)
+
+    def test_mensaje_de_partida_cancelada_segun_quien_cancelo(self):
+        t = self.turno(self.cancha)
+        cap = self.jugador("cap")
+        lobby_id = self.crear(cap, t).data["id"]
+        self.client.delete(f"{URL}{lobby_id}/")
+        d = self.client.get(f"{URL}{lobby_id}/").data
+        self.assertEqual(d["cancelada_por"], "CAPITAN")
+        self.assertEqual(
+            d["mensaje_reserva"], "Partida cancelada por el capitán — el turno quedó libre"
+        )
+
     def test_check_in_de_otro_club_no_funciona(self):
         t = self.turno(self.cancha)
         lobby_id = self.crear(self.jugador("cap"), t).data["id"]
