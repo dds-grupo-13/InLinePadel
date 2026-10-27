@@ -95,6 +95,14 @@ class Lobby(models.Model):
             raise ValidationError("El check-in debe ser anterior al inicio del turno.")
 
 
+    @property
+    def estado_reserva(self):
+        return {
+            self.Estado.EN_FORMACION: "PROVISORIA",
+            self.Estado.COMPLETO: "CONFIRMADA",
+            self.Estado.JUGADO: "CUMPLIDA",
+        }.get(self.estado)
+
     @classmethod
     def conflicto_horario(cls, jugador, turno, excluir_lobby=None):
         vigentes = cls.objects.filter(
@@ -134,15 +142,15 @@ class Lobby(models.Model):
                 )
             superpuesto = cls.conflicto_horario(capitan, turno)
             if superpuesto:
-                raise ErrorDominio(
+                raise Conflicto(
                     "Ya participás de otra partida en ese horario "
-                    f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                    f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
                 )
             bloqueado = Turno.objects.filter(
                 pk=turno.pk, estado=Turno.Estado.LIBRE
             ).update(estado=Turno.Estado.BLOQUEADO)
             if not bloqueado:
-                raise Conflicto("El turno ya fue tomado por otro jugador.")
+                cls._rechazar_turno_no_libre(turno)
             turno.estado = Turno.Estado.BLOQUEADO
             lobby = cls(turno=turno, capitan=capitan, **campos)
             lobby.full_clean()
@@ -157,9 +165,24 @@ class Lobby(models.Model):
             )
             return lobby
 
+    @classmethod
+    def _rechazar_turno_no_libre(cls, turno):
+        Turno = cls._meta.get_field("turno").related_model
+        actual = (
+            Turno.objects.filter(pk=turno.pk).values_list("estado", flat=True).first()
+        )
+        if actual == Turno.Estado.NO_DISPONIBLE:
+            raise Conflicto("El club retiró este turno de la oferta.")
+        if actual == Turno.Estado.CUMPLIDO:
+            raise ErrorDominio("El turno ya pasó.")
+        raise Conflicto("El turno ya fue tomado por otro jugador.")
+
     def inscribir(self, jugador):
+        # Orden de locks: primero el lobby, después el jugador. Quien tome los
+        # locks en otro orden (ver _PedidoLobby.aceptar) puede generar deadlocks.
         for _ in range(self.CANTIDAD_CUPOS):
             with transaction.atomic():
+                lobby = Lobby.objects.select_for_update().get(pk=self.pk)
                 type(jugador).objects.select_for_update().filter(pk=jugador.pk).first()
                 superpuesto = Lobby.conflicto_horario(
                     jugador, self.turno, excluir_lobby=self.pk
@@ -167,10 +190,9 @@ class Lobby(models.Model):
                 if superpuesto:
                     raise Conflicto(
                         "Ya participás de otra partida en ese horario "
-                        f"({superpuesto.turno.inicio:%d/%m %H:%M})."
+                        f"({timezone.localtime(superpuesto.turno.inicio):%d/%m %H:%M})."
                     )
-                estado = Lobby.objects.values_list("estado", flat=True).get(pk=self.pk)
-                if estado != self.Estado.EN_FORMACION:
+                if lobby.estado != self.Estado.EN_FORMACION:
                     raise Conflicto("La partida ya no está abierta a nuevos jugadores.")
                 ocupados = set(
                     Inscripcion.objects.filter(lobby_id=self.pk).values_list(
@@ -188,13 +210,17 @@ class Lobby(models.Model):
                             lobby_id=self.pk, jugador=jugador, numero_cupo=libres[0]
                         )
                 except IntegrityError:
+                    # Defensa: las restricciones únicas siguen vigentes aunque el
+                    # lock del lobby ya serializa las inscripciones.
                     if Inscripcion.objects.filter(lobby_id=self.pk, jugador=jugador).exists():
                         raise ErrorDominio("El jugador ya está inscripto en este lobby")
                     continue
                 if len(ocupados) + 1 >= self.CANTIDAD_CUPOS:
-                    Lobby.objects.filter(
+                    completado = Lobby.objects.filter(
                         pk=self.pk, estado=self.Estado.EN_FORMACION
                     ).update(estado=self.Estado.COMPLETO)
+                    if not completado:
+                        raise Conflicto("La partida ya no está abierta a nuevos jugadores.")
                     self.estado = self.Estado.COMPLETO
                     self._confirmar_reserva()
                     self._expirar_pendientes()
@@ -203,7 +229,7 @@ class Lobby(models.Model):
 
     def abandonar(self, jugador):
         with transaction.atomic():
-            lobby = Lobby.objects.get(pk=self.pk)
+            lobby = Lobby.objects.select_for_update().get(pk=self.pk)
             if lobby.estado not in (self.Estado.EN_FORMACION, self.Estado.COMPLETO):
                 raise ErrorDominio(f"No se puede abandonar un lobby {lobby.estado}")
             borradas, _ = Inscripcion.objects.filter(

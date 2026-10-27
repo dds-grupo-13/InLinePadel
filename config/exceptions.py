@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 _SQLSTATE_BLOQUEO = {"55P03", "40001", "40P01"}
 
 
+# Criterio de códigos HTTP para errores de dominio:
+# - Conflicto (409): la operación choca con el estado actual de otro recurso
+#   (turno tomado, cupo ocupado, superposición con otra partida, lobby que ya
+#   no está abierto).
+# - ErrorDominio (400): el pedido es inválido en sí mismo (turno pasado, club
+#   o cancha no habilitados, límite de lobbies en formación).
 class ErrorDominio(ValueError):
     pass
 

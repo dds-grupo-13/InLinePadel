@@ -54,7 +54,7 @@ class LobbyAPITests(BaseAPITestCase):
         j = self.jugador("cap")
         self.assertEqual(self.crear(j, self.turno(self.cancha, hora=20)).status_code, 201)
         r = self.crear(j, self.turno(self.otra_cancha, hora=20))
-        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.status_code, 409)
         self.assertIn("horario", str(r.data))
 
     def test_cu02_unirse_hasta_completar_confirma_reserva(self):
@@ -83,6 +83,40 @@ class LobbyAPITests(BaseAPITestCase):
         self.assertEqual(self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 409)
         t.refresh_from_db()
         self.assertEqual(t.estado, "CUMPLIDO")
+
+    def test_estado_de_reserva_en_ocupacion_y_detalle_hasta_cumplida(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t).data["id"]
+        ocupacion = f"/api/clubes/clubes/{self.club.pk}/ocupacion/"
+
+        def reserva_en_ocupacion():
+            self.login(self.admin)
+            fila = next(
+                f for f in self.client.get(ocupacion).data["results"] if f["id"] == t.pk
+            )
+            return fila["lobby"]["reserva"]
+
+        self.assertEqual(reserva_en_ocupacion(), "PROVISORIA")
+        jugadores = [self.jugador(n) for n in ("j2", "j3", "j4")]
+        for j in jugadores:
+            self.login(j.usuario)
+            self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(reserva_en_ocupacion(), "CONFIRMADA")
+
+        codigo = Lobby.objects.get().codigo_reserva
+        self.habilitar_check_in()
+        self.login(self.admin)
+        self.assertEqual(
+            self.client.post(f"{URL}check_in/", {"codigo_reserva": codigo}).status_code, 200
+        )
+        self.assertEqual(reserva_en_ocupacion(), "CUMPLIDA")
+
+        self.login(jugadores[0].usuario)
+        detalle = self.client.get(f"{URL}{lobby_id}/").data
+        self.assertEqual(detalle["estado"], "JUGADO")
+        self.assertEqual(detalle["estado_reserva"], "CUMPLIDA")
+        self.assertEqual(detalle["mensaje_reserva"], "Partido jugado — reserva cumplida")
+        self.assertEqual(detalle["codigo_reserva"], codigo)
 
     def test_check_in_de_otro_club_no_funciona(self):
         t = self.turno(self.cancha)
@@ -146,6 +180,82 @@ class LobbyAPITests(BaseAPITestCase):
         self.assertEqual(self.client.get(f"{URL}?precio_max=1500").data["count"], 8)
         self.assertEqual(self.client.get(f"{URL}?club={self.otro_club.pk}").data["count"], 1)
         self.assertEqual(self.client.get(f"{URL}?hora_desde=16:00").data["count"], 4)
+
+    def test_estado_multiple_y_orden_por_inicio(self):
+        cap = self.jugador("cap")
+        ids = {}
+        for h in (8, 12, 16):
+            ids[h] = self.crear(cap if h < 16 else self.jugador("cap2"), self.turno(self.cancha, hora=h)).data["id"]
+        Lobby.objects.filter(pk=ids[12]).update(estado="COMPLETO")
+        Lobby.objects.filter(pk=ids[16]).update(estado="CANCELADO")
+        self.login(cap.usuario)
+
+        def listar(query):
+            return [l["id"] for l in self.client.get(f"{URL}?{query}").data["results"]]
+
+        self.assertEqual(listar("estado=EN_FORMACION"), [ids[8]])
+        self.assertEqual(listar("estado=EN_FORMACION&estado=COMPLETO"), [ids[8], ids[12]])
+        self.assertEqual(listar("estado=EN_FORMACION&estado=COMPLETO&orden=-inicio"), [ids[12], ids[8]])
+        self.assertEqual(listar("estado=COMPLETO&estado=EN_FORMACION&orden=inicio"), [ids[8], ids[12]])
+
+    def test_resumen_por_club(self):
+        resumen = f"{URL}resumen_por_club/"
+        j2, j3 = self.jugador("j2"), self.jugador("j3")
+        visitante = self.jugador("visita")
+        # Club A: dos públicos (uno con 2 inscriptos), uno privado sin invitación,
+        # uno privado con invitación y uno donde el visitante ya está inscripto.
+        cercano = self.crear(j2, self.turno(self.cancha, dias=2, hora=8)).data["id"]
+        lejano = self.crear(j3, self.turno(self.cancha, dias=4, hora=12)).data["id"]
+        Lobby.objects.get(pk=lejano).inscribir(self.jugador("extra"))
+        self.crear(self.jugador("p1"), self.turno(self.cancha, dias=5, hora=16), privacidad="PRIVADO")
+        cap_privado = self.jugador("p2")
+        privado_invitado = self.crear(
+            cap_privado, self.turno(self.cancha, dias=6, hora=8), privacidad="PRIVADO"
+        ).data["id"]
+        Invitacion.objects.create(
+            lobby=Lobby.objects.get(pk=privado_invitado), emisor=cap_privado, receptor=visitante
+        )
+        propio = self.crear(visitante, self.turno(self.cancha, dias=7, hora=8)).data["id"]
+        # Club B: uno caro y uno completo.
+        caro = self.crear(self.jugador("c1"), self.turno(self.otra_cancha, dias=2, hora=9, precio="20000")).data["id"]
+        completo = self.crear(self.jugador("c2"), self.turno(self.otra_cancha, dias=3, hora=9)).data["id"]
+        for n in ("k1", "k2", "k3"):
+            Lobby.objects.get(pk=completo).inscribir(self.jugador(n))
+
+        self.login(visitante.usuario)
+        r = self.client.get(resumen)
+        self.assertEqual(r.status_code, 200, r.data)
+        por_club = {f["club"]: f for f in r.data}
+        self.assertEqual(set(por_club), {self.club.pk, self.otro_club.pk})
+        a = por_club[self.club.pk]
+        # cercano (3 libres) + lejano (2 libres) + privado invitado (3 libres);
+        # sin el privado sin invitación ni el propio.
+        self.assertEqual(
+            (a["disponibles"], a["cupos_libres"], a["invitaciones"]), (3, 8, 1)
+        )
+        self.assertEqual(a["proximo"]["id"], cercano)
+        self.assertEqual(
+            set(a["proximo"]), {"id", "fecha", "hora_inicio", "inicio"}
+        )
+        b = por_club[self.otro_club.pk]
+        self.assertEqual((b["disponibles"], b["cupos_libres"], b["invitaciones"]), (1, 3, 0))
+        self.assertEqual(b["proximo"]["id"], caro)
+
+        # Filtros de LobbyFilter.
+        r = self.client.get(f"{resumen}?club={self.otro_club.pk}")
+        self.assertEqual([f["club"] for f in r.data], [self.otro_club.pk])
+        r = self.client.get(f"{resumen}?precio_max=1500")
+        self.assertEqual([f["club"] for f in r.data], [self.club.pk])
+        r = self.client.get(f"{resumen}?hora_desde=10:00")
+        self.assertEqual(
+            (r.data[0]["disponibles"], r.data[0]["proximo"]["id"]), (1, lejano)
+        )
+        r = self.client.get(f"{resumen}?zona={self.zona.pk + 100}")
+        self.assertEqual(r.data, [])
+        self.assertNotIn(propio, [f["proximo"]["id"] for f in self.client.get(resumen).data])
+
+    def test_resumen_por_club_exige_autenticacion(self):
+        self.assertEqual(self.client.get(f"{URL}resumen_por_club/").status_code, 401)
 
     def test_comando_vence_lobbies_y_libera_turno(self):
         t = self.turno(self.cancha)

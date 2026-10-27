@@ -158,6 +158,6 @@ class TurnoOcupacionSerializer(serializers.ModelSerializer):
             "estado": lobby.estado,
             "privacidad": lobby.privacidad,
             "cupos_ocupados": len(lobby.inscripciones.all()),
-            "reserva": "CONFIRMADA" if turno.estado == Turno.Estado.CONFIRMADO else "PROVISORIA",
+            "reserva": lobby.estado_reserva,
             "codigo_reserva": lobby.codigo_reserva,
         }

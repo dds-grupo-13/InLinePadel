@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -98,8 +99,32 @@ class LobbyCrearTests(LobbyBaseTestCase):
     def test_rechaza_horario_superpuesto_del_capitan(self):
         Lobby.crear(self.turno_libre, self.capitan)
         superpuesto = self.turno(self.otra_cancha, dias=3, hora=20)
-        with self.assertRaises(ErrorDominio):
+        with self.assertRaises(Conflicto):
             Lobby.crear(superpuesto, self.capitan)
+
+    def test_turno_ocupado_da_mensaje_segun_su_estado(self):
+        casos = (
+            (Turno.Estado.BLOQUEADO, Conflicto, "ya fue tomado"),
+            (Turno.Estado.CONFIRMADO, Conflicto, "ya fue tomado"),
+            (Turno.Estado.NO_DISPONIBLE, Conflicto, "retiró este turno"),
+            (Turno.Estado.CUMPLIDO, ErrorDominio, "ya pasó"),
+        )
+        for i, (estado, excepcion, texto) in enumerate(casos):
+            with self.subTest(estado=estado):
+                turno = self.turno(self.cancha, dias=7, hora=8 + 3 * i)
+                Turno.objects.filter(pk=turno.pk).update(estado=estado)
+                turno.refresh_from_db()
+                turno.estado = Turno.Estado.LIBRE
+                with self.assertRaises(excepcion) as ctx:
+                    Lobby.crear(turno, self.jugador(f"cap_{estado}"))
+                self.assertIs(type(ctx.exception), excepcion)
+                self.assertIn(texto, str(ctx.exception))
+
+    def test_mensaje_de_superposicion_usa_hora_local(self):
+        Lobby.crear(self.turno(self.cancha, dias=5, hora=19), self.capitan)
+        with self.assertRaises(ErrorDominio) as ctx:
+            Lobby.crear(self.turno(self.otra_cancha, dias=5, hora=19), self.capitan)
+        self.assertIn("19:00", str(ctx.exception))
 
     def test_falla_atomica_no_deja_el_turno_bloqueado(self):
         antes = self.turno_libre.inicio
@@ -214,6 +239,33 @@ class LobbyInscribirTests(LobbyBaseTestCase):
         Lobby.crear(otro_turno, j2)
         with self.assertRaises(Conflicto):
             self.lobby.inscribir(j2)
+
+    def test_mensaje_de_superposicion_al_inscribir_usa_hora_local(self):
+        j2 = self.jugador("j2")
+        Lobby.crear(self.turno(self.otra_cancha, dias=5, hora=19), j2)
+        lobby = Lobby.crear(self.turno(self.cancha, dias=5, hora=19), self.jugador("cap2"))
+        with self.assertRaises(Conflicto) as ctx:
+            lobby.inscribir(j2)
+        self.assertIn("19:00", str(ctx.exception))
+
+    def test_no_confirma_si_el_lobby_se_cancelo_mientras_ocupaba_el_ultimo_cupo(self):
+        for nombre in ("j2", "j3"):
+            self.lobby.inscribir(self.jugador(nombre))
+
+        def cancelar_en_paralelo(*args, **kwargs):
+            Lobby.objects.filter(pk=self.lobby.pk).update(estado=Lobby.Estado.CANCELADO)
+
+        with mock.patch.object(Lobby, "conflicto_horario", side_effect=cancelar_en_paralelo):
+            with self.assertRaises(Conflicto):
+                self.lobby.inscribir(self.jugador("j4"))
+        lobby = Lobby.objects.get(pk=self.lobby.pk)
+        self.assertIsNone(lobby.codigo_reserva)
+        self.assertEqual(lobby.inscripciones.count(), 3)
+        self.turno_libre.refresh_from_db()
+        self.assertEqual(self.turno_libre.estado, Turno.Estado.BLOQUEADO)
+        self.assertFalse(
+            Notificacion.objects.filter(mensaje__startswith="Reserva confirmada").exists()
+        )
 
     def test_lobby_cancelado_no_acepta_jugadores(self):
         self.lobby.cancelar()

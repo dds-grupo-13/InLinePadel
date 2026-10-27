@@ -23,9 +23,14 @@ from .serializers import (
 class LoginRateThrottle(SimpleRateThrottle):
     scope = "login"
     cache_key_prefix = "login"
+    MAX_INTENTOS = 10
+    VENTANA_SEGUNDOS = 15 * 60
+
+    def get_rate(self):
+        return f"{self.MAX_INTENTOS} cada {self.VENTANA_SEGUNDOS // 60} minutos"
 
     def parse_rate(self, rate):
-        return 10, 15 * 60
+        return self.MAX_INTENTOS, self.VENTANA_SEGUNDOS
 
     def get_cache_key(self, request, view):
         return self.cache_format % {

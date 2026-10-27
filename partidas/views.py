@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -17,7 +17,11 @@ from social.notificaciones import notificar
 
 from .filters import LobbyFilter
 from .models import Inscripcion, Lobby
-from .serializers import InscripcionSerializer, LobbySerializer
+from .serializers import (
+    InscripcionSerializer,
+    LobbySerializer,
+    ProximoLobbySerializer,
+)
 
 
 class LobbyViewSet(viewsets.ModelViewSet):
@@ -89,6 +93,52 @@ class LobbyViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         return self.cancelar(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"])
+    def resumen_por_club(self, request):
+        abiertos = self.filter_queryset(self.get_queryset()).filter(
+            estado=Lobby.Estado.EN_FORMACION,
+            es_mio=False,
+            ocupados__lt=Lobby.CANTIDAD_CUPOS,
+        )
+        invitado = Invitacion.objects.filter(
+            lobby=OuterRef("pk"),
+            receptor=request.user.jugador,
+            estado=Invitacion.Estado.PENDIENTE,
+        )
+        base = Lobby.objects.filter(pk__in=abiertos.order_by().values("pk")).annotate(
+            es_invitado=Exists(invitado)
+        )
+        proximo = base.filter(turno__cancha__club=OuterRef("club")).order_by(
+            "turno__inicio", "pk"
+        )
+        filas = list(
+            base.order_by()
+            .values(club=F("turno__cancha__club"))
+            .annotate(
+                disponibles=Count("pk", distinct=True),
+                cupos_libres=Lobby.CANTIDAD_CUPOS * Count("pk", distinct=True)
+                - Count("inscripciones"),
+                invitaciones=Count("pk", filter=Q(es_invitado=True), distinct=True),
+                proximo_id=Subquery(proximo.values("pk")[:1]),
+            )
+            .order_by("club")
+        )
+        proximos = Lobby.objects.select_related("turno").in_bulk(
+            [f["proximo_id"] for f in filas]
+        )
+        return Response(
+            [
+                {
+                    "club": f["club"],
+                    "disponibles": f["disponibles"],
+                    "cupos_libres": f["cupos_libres"],
+                    "invitaciones": f["invitaciones"],
+                    "proximo": ProximoLobbySerializer(proximos[f["proximo_id"]]).data,
+                }
+                for f in filas
+            ]
+        )
 
     @action(detail=True, methods=["post"])
     def cancelar(self, request, *args, **kwargs):

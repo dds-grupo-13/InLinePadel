@@ -96,6 +96,9 @@ class _PedidoLobby:
 
     def aceptar(self):
         with transaction.atomic():
+            # Mismo orden de locks que Lobby.cancelar: primero el lobby y
+            # después sus pedidos, para no generar deadlocks.
+            type(self.lobby).objects.select_for_update().get(pk=self.lobby_id)
             self._transicionar(self.Estado.ACEPTADA)
             self.lobby.inscribir(self.jugador_a_inscribir)
 
