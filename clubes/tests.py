@@ -181,3 +181,16 @@ class CancelarPorClubTests(BaseAPITestCase):
             self.assertEqual(self.client.post(self.url(turno), cuerpo, format="json").status_code, 400)
         lobby.refresh_from_db()
         self.assertEqual(lobby.estado, "EN_FORMACION")
+
+
+class OcupacionTests(BaseAPITestCase):
+    def test_ocupacion_expone_inicio_y_fin_del_turno(self):
+        turno = self.turno(self.cancha)
+        self.login(self.admin)
+        r = self.client.get(f"/api/clubes/clubes/{self.club.pk}/ocupacion/")
+        self.assertEqual(r.status_code, 200)
+        fila = next(f for f in r.data["results"] if f["id"] == turno.pk)
+        turno.refresh_from_db()
+        self.assertEqual(fila["inicio"][:16], turno.inicio.astimezone().isoformat()[:16])
+        self.assertIn("fin", fila)
+        self.assertTrue(fila["fin"] > fila["inicio"])

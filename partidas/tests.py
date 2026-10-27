@@ -4,7 +4,7 @@ from io import StringIO
 from django.core.management import call_command
 from django.utils import timezone
 
-from clubes.models import Turno
+from clubes.models import Club, Turno
 from config.test_utils import BaseAPITestCase
 from partidas.models import Lobby
 from social.models import Invitacion, SolicitudAcceso
@@ -126,6 +126,53 @@ class LobbyAPITests(BaseAPITestCase):
             self.login(j.usuario)
             self.client.post(f"{URL}{lobby_id}/unirse/")
         return lobby_id, cap, jugadores
+
+    def test_unirse_a_una_partida_completa_da_409_con_mensaje(self):
+        lobby_id, _, _ = self.completar(self.turno(self.cancha))
+        self.login(self.jugador("quinto").usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(r.data["detail"], "El partido ya está completo.")
+
+    def test_unirse_a_una_partida_cancelada_da_409(self):
+        cap = self.jugador("cap")
+        lobby_id = self.crear(cap, self.turno(self.cancha)).data["id"]
+        self.client.delete(f"{URL}{lobby_id}/")
+        self.login(self.jugador("otro").usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(r.data["detail"], "La partida fue cancelada.")
+
+    def test_unirse_a_una_partida_que_ya_comenzo_da_409(self):
+        t = self.turno(self.cancha)
+        lobby_id = self.crear(self.jugador("cap"), t).data["id"]
+        inicio = timezone.now() - timedelta(minutes=10)
+        Turno.objects.filter(pk=t.pk).update(inicio=inicio, fin=inicio + timedelta(minutes=90))
+        self.login(self.jugador("otro").usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(r.data["detail"], "La partida ya comenzó.")
+
+    def test_unirse_con_el_club_suspendido_da_409(self):
+        lobby_id = self.crear(self.jugador("cap"), self.turno(self.cancha)).data["id"]
+        Club.objects.filter(pk=self.club.pk).update(estado=Club.Estado.SUSPENDIDO)
+        self.login(self.jugador("otro").usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(
+            r.data["detail"], "El club no está recibiendo reservas en este momento."
+        )
+
+    def test_invitado_que_pierde_la_carrera_por_un_privado_recibe_409(self):
+        cap, visita = self.jugador("cap"), self.jugador("visita")
+        lobby_id = self.crear(cap, self.turno(self.cancha), privacidad="PRIVADO").data["id"]
+        lobby = Lobby.objects.get(pk=lobby_id)
+        Invitacion.objects.create(lobby=lobby, emisor=cap, receptor=visita)
+        for nombre in ("j2", "j3", "j4"):
+            lobby.inscribir(self.jugador(nombre))
+        self.login(visita.usuario)
+        r = self.client.post(f"{URL}{lobby_id}/unirse/")
+        self.assertEqual(r.status_code, 409, r.data)
 
     def test_capitan_no_cancela_una_partida_completa(self):
         t = self.turno(self.cancha)

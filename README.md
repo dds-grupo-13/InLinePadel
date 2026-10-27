@@ -64,9 +64,13 @@ pip install -r requirements.txt
 
 ```bash
 python manage.py migrate
+python manage.py createcachetable
 python manage.py seed_demo_data
 python manage.py runserver
 ```
+
+`createcachetable` crea la tabla de la caché compartida que usa el throttling
+(límite de intentos de login) cuando hay varios workers.
 
 El comando `seed_demo_data` es idempotente: crea zonas, clubes, canchas,
 turnos, partidas y los usuarios demo para la presentación. El despliegue con
@@ -81,6 +85,33 @@ Suite completa (SQLite, sin dependencias externas):
 ```bash
 USE_SQLITE=1 SECRET_KEY=x python manage.py test
 ```
+
+### Flujo E2E con Postman / newman
+
+La carpeta **"Flujo E2E"** de `InLinePadel.postman_collection.json` recorre el ciclo
+completo contra un server real: registro de jugadores, contactos, cancha y turnos
+nuevos (en 3 días, en 2 horas y en 10 minutos), partida completa, bajarse,
+reserva firme, cesión del lugar, cancelación por el club, check-in y ocupación.
+Es autocontenida: solo necesita el admin de Club Padel Norte que crea el seed.
+
+```bash
+python manage.py migrate
+python manage.py createcachetable
+python manage.py seed_demo_data
+python manage.py runserver            # con DEBUG=1 y ALLOWED_HOSTS en el .env
+npx newman run InLinePadel.postman_collection.json --folder "Flujo E2E"
+```
+
+Usa 6 logins por corrida y el límite es de 10 cada 15 minutos por IP, así que
+para repetirla enseguida hay que limpiar el throttling (la caché es compartida,
+también entre workers):
+
+```bash
+python manage.py shell -c "from django.core.cache import cache; cache.clear()"
+```
+
+Las demás carpetas de la colección son requests sueltos de referencia; sus
+variables (`username`, `admin_username`, etc.) coinciden con los usuarios del seed.
 
 ### Concurrencia contra PostgreSQL (RNF02)
 

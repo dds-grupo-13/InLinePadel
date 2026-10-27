@@ -157,7 +157,11 @@ class TurnoOcupacionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Turno
-        fields = ["id", "fecha", "hora_inicio", "cancha", "cancha_numero", "estado", "lobby"]
+        fields = [
+            "id", "fecha", "hora_inicio", "inicio", "fin", "cancha", "cancha_numero",
+            "estado", "lobby",
+        ]
+        read_only_fields = ["inicio", "fin"]
 
     def get_lobby(self, turno):
         lobby = next((l for l in turno.lobbies.all() if l.estado != "CANCELADO"), None)

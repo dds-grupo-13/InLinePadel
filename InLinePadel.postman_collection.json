@@ -2434,6 +2434,2206 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Flujo E2E",
+      "item": [
+        {
+          "name": "0. Preparación",
+          "item": [
+            {
+              "name": "Login del admin de Club Padel Norte",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Primer paso del flujo E2E: necesita el seed (`seed_demo_data`). Usa 6 logins en total (límite: 10 cada 15 minutos por IP)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Sufijo aleatorio para que la corrida sea repetible sin chocar con usuarios anteriores.",
+                      "pm.collectionVariables.set('e2e_sfx', Math.random().toString(36).slice(2, 8));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_admin', _j.access);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Zona para los jugadores",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/zonas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "zonas",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "const _zonas = Array.isArray(_j) ? _j : _j.results;",
+                      "pm.collectionVariables.set('e2e_zona', _zonas[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Club Padel Norte",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "const _club = (Array.isArray(_j) ? _j : _j.results).find(c => c.denominacion === 'Club Padel Norte');",
+                      "pm.test('Existe Club Padel Norte (¿corriste seed_demo_data?)', function () { pm.expect(_club).to.exist; });",
+                      "pm.collectionVariables.set('e2e_club', _club.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Registrar jugador a",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/jugadores/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "jugadores",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"usuario\": {\n    \"username\": \"e2e_a_{{e2e_sfx}}\",\n    \"email\": \"e2e_a_{{e2e_sfx}}@example.com\",\n    \"first_name\": \"JugadorA\",\n    \"last_name\": \"E2E\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{e2e_zona}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Registrar jugador b",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/jugadores/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "jugadores",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"usuario\": {\n    \"username\": \"e2e_b_{{e2e_sfx}}\",\n    \"email\": \"e2e_b_{{e2e_sfx}}@example.com\",\n    \"first_name\": \"JugadorB\",\n    \"last_name\": \"E2E\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{e2e_zona}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Registrar jugador c",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/jugadores/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "jugadores",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"usuario\": {\n    \"username\": \"e2e_c_{{e2e_sfx}}\",\n    \"email\": \"e2e_c_{{e2e_sfx}}@example.com\",\n    \"first_name\": \"JugadorC\",\n    \"last_name\": \"E2E\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{e2e_zona}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Registrar jugador d",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/jugadores/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "jugadores",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"usuario\": {\n    \"username\": \"e2e_d_{{e2e_sfx}}\",\n    \"email\": \"e2e_d_{{e2e_sfx}}@example.com\",\n    \"first_name\": \"JugadorD\",\n    \"last_name\": \"E2E\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{e2e_zona}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Registrar jugador e",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/jugadores/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "jugadores",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"usuario\": {\n    \"username\": \"e2e_e_{{e2e_sfx}}\",\n    \"email\": \"e2e_e_{{e2e_sfx}}@example.com\",\n    \"first_name\": \"JugadorE\",\n    \"last_name\": \"E2E\",\n    \"password\": \"clave12345\"\n  },\n  \"posicion\": \"DRIVE\",\n  \"zona\": \"{{e2e_zona}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login jugador a",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"e2e_a_{{e2e_sfx}}\",\n  \"password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_a', _j.access);",
+                      "pm.collectionVariables.set('id_a', _j.usuario.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login jugador b",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"e2e_b_{{e2e_sfx}}\",\n  \"password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_b', _j.access);",
+                      "pm.collectionVariables.set('id_b', _j.usuario.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login jugador c",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"e2e_c_{{e2e_sfx}}\",\n  \"password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_c', _j.access);",
+                      "pm.collectionVariables.set('id_c', _j.usuario.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login jugador d",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"e2e_d_{{e2e_sfx}}\",\n  \"password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_d', _j.access);",
+                      "pm.collectionVariables.set('id_d', _j.usuario.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Login jugador e",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/usuarios/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "usuarios",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"e2e_e_{{e2e_sfx}}\",\n  \"password\": \"clave12345\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('tok_e', _j.access);",
+                      "pm.collectionVariables.set('id_e', _j.usuario.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Contacto: b le envía solicitud a e",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contacto\": \"{{id_e}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_contacto', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Contacto: e acepta",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/contactos/{{e2e_contacto}}/aceptar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "contactos",
+                    "{{e2e_contacto}}",
+                    "aceptar",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_e}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Contacto aceptado\", function () { pm.expect(pm.response.json().estado === 'ACEPTADO').to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El admin crea una cancha propia",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/canchas/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "canchas",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"numero\": \"{{e2e_numero_cancha}}\",\n  \"club\": \"{{e2e_club}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('e2e_numero_cancha', 100 + Math.floor(Math.random() * 800));",
+                      "// Hora argentina (UTC-3 fijo, sin horario de verano): el servidor usa America/Argentina/Buenos_Aires",
+                      "// y el script corre en la zona del cliente.",
+                      "const ar = (ms) => new Date(Date.now() + ms - 3 * 3600 * 1000);",
+                      "const fecha = (d) => d.toISOString().slice(0, 10);",
+                      "const hora = (d) => d.toISOString().slice(11, 16);",
+                      "const en3d = ar(3 * 24 * 3600 * 1000), en2h = ar(2 * 3600 * 1000), en10m = ar(10 * 60 * 1000);",
+                      "pm.collectionVariables.set('e2e_fecha3d', fecha(en3d));",
+                      "pm.collectionVariables.set('e2e_hora3d', '20:00');",
+                      "pm.collectionVariables.set('e2e_fecha2h', fecha(en2h));",
+                      "pm.collectionVariables.set('e2e_hora2h', hora(en2h));",
+                      "pm.collectionVariables.set('e2e_fecha10m', fecha(en10m));",
+                      "pm.collectionVariables.set('e2e_hora10m', hora(en10m));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_cancha', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El admin crea el turno en 3 días",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cancha\": \"{{e2e_cancha}}\",\n  \"fecha\": \"{{e2e_fecha3d}}\",\n  \"hora_inicio\": \"{{e2e_hora3d}}\",\n  \"duracion\": 90,\n  \"precio\": \"4000.00\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_turno3d', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El admin crea el turno en 2 horas",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cancha\": \"{{e2e_cancha}}\",\n  \"fecha\": \"{{e2e_fecha2h}}\",\n  \"hora_inicio\": \"{{e2e_hora2h}}\",\n  \"duracion\": 90,\n  \"precio\": \"4000.00\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_turno2h', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El admin crea el turno en 10 minutos",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"cancha\": \"{{e2e_cancha}}\",\n  \"fecha\": \"{{e2e_fecha10m}}\",\n  \"hora_inicio\": \"{{e2e_hora10m}}\",\n  \"duracion\": 90,\n  \"precio\": \"4000.00\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_turno10m', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "1. Turno en 3 días: partida completa, bajarse y reponer",
+          "item": [
+            {
+              "name": "a crea la partida",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"turno\": \"{{e2e_turno3d}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_lobby3d', _j.id);",
+                      "pm.test(\"Reserva provisoria\", function () { pm.expect(_j.estado_reserva === 'PROVISORIA').to.be.true; });",
+                      "pm.test(\"Cierre 3 h antes del inicio\", function () { pm.expect(!!_j.cierre).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "c se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_c}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "d se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_d}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"La cuarta persona confirma la reserva\", function () { pm.expect(_j.estado_reserva === 'CONFIRMADA').to.be.true; });",
+                      "pm.test(\"Tiene código de reserva\", function () { pm.expect(/^[0-9A-F]{4}-[0-9A-F]{4}$/.test(_j.codigo_reserva)).to.be.true; });",
+                      "pm.test(\"Todavía no es firme\", function () { pm.expect(_j.reserva_firme === false).to.be.true; });",
+                      "pm.test(\"Puede bajarse hasta el cierre\", function () { pm.expect(_j.puede_abandonar === true).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El capitán no puede cancelar una partida completa",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/cancelar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "cancelar",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 409', function () { pm.response.to.have.status(409); });",
+                      "pm.test(\"Mensaje claro\", function () { pm.expect(pm.response.json().detail.indexOf('bajarse hasta el') !== -1).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b se baja antes del cierre",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/abandonar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "abandonar",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "La partida volvió a provisoria",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"En formación\", function () { pm.expect(_j.estado === 'EN_FORMACION').to.be.true; });",
+                      "pm.test(\"Reserva provisoria\", function () { pm.expect(_j.estado_reserva === 'PROVISORIA').to.be.true; });",
+                      "pm.test(\"El código dejó de valer\", function () { pm.expect(_j.codigo_reserva === null).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "e ocupa el cupo y se confirma de nuevo",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_e}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"Reserva confirmada\", function () { pm.expect(_j.estado_reserva === 'CONFIRMADA').to.be.true; });",
+                      "pm.test(\"Código nuevo\", function () { pm.expect(/^[0-9A-F]{4}-[0-9A-F]{4}$/.test(_j.codigo_reserva)).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "2. Turno en 2 horas: reserva firme y cesión",
+          "item": [
+            {
+              "name": "a crea la partida de último momento",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"turno\": \"{{e2e_turno2h}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_lobby2h', _j.id);",
+                      "pm.test(\"Aviso de último momento\", function () { pm.expect(_j.aviso_cierre.indexOf('último momento') !== -1).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "c se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_c}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "d se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_d}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"Queda firme apenas se completa\", function () { pm.expect(_j.reserva_firme === true).to.be.true; });",
+                      "pm.test(\"Tiene código\", function () { pm.expect(/^[0-9A-F]{4}-[0-9A-F]{4}$/.test(_j.codigo_reserva)).to.be.true; });",
+                      "pm.collectionVariables.set('e2e_codigo2h', _j.codigo_reserva);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b no puede bajarse de una reserva firme",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/abandonar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    "abandonar",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 409', function () { pm.response.to.have.status(409); });",
+                      "pm.test(\"Menciona que es firme y sugiere ceder\", function () { pm.expect(pm.response.json().detail.indexOf('firme') !== -1 && pm.response.json().detail.indexOf('ceder') !== -1).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b cede su lugar a e",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/ceder/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    "ceder",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"receptor\": \"{{id_e}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_cesion', _j.id);",
+                      "pm.test(\"Es una cesión\", function () { pm.expect(_j.tipo === 'CESION').to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "e acepta la cesión",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/social/invitaciones/{{e2e_cesion}}/aceptar/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "social",
+                    "invitaciones",
+                    "{{e2e_cesion}}",
+                    "aceptar",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_e}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Aceptada\", function () { pm.expect(pm.response.json().estado === 'ACEPTADA').to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "e ocupa el lugar con el mismo código",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_e}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"Sigue completa\", function () { pm.expect(_j.estado === 'COMPLETO').to.be.true; });",
+                      "pm.test(\"Mismo código de reserva\", function () { pm.expect(_j.codigo_reserva === pm.collectionVariables.get('e2e_codigo2h')).to.be.true; });",
+                      "pm.test(\"Ya no se puede bajar\", function () { pm.expect(_j.puede_abandonar === false).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b ya no ve la partida",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby2h}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby2h}}",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 404', function () { pm.response.to.have.status(404); });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "3. Cancelación por el club",
+          "item": [
+            {
+              "name": "El club cancela la partida del turno en 3 días",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/turnos/{{e2e_turno3d}}/cancelar_por_club/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "turnos",
+                    "{{e2e_turno3d}}",
+                    "cancelar_por_club",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"motivo\": \"Lluvia: cancha descubierta inhabilitada\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"El turno queda no disponible\", function () { pm.expect(pm.response.json().estado === 'NO_DISPONIBLE').to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "a ve la partida cancelada por el club",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby3d}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby3d}}",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"Cancelada\", function () { pm.expect(_j.estado === 'CANCELADO').to.be.true; });",
+                      "pm.test(\"Por el club\", function () { pm.expect(_j.cancelada_por === 'CLUB').to.be.true; });",
+                      "pm.test(\"Con el motivo\", function () { pm.expect(_j.mensaje_reserva.indexOf('Lluvia') !== -1).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "4. Check-in y ocupación",
+          "item": [
+            {
+              "name": "a crea la partida del turno en 10 minutos",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_a}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"turno\": \"{{e2e_turno10m}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+                      "const _j = pm.response.json();",
+                      "pm.collectionVariables.set('e2e_lobby10m', _j.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "b se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby10m}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby10m}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_b}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "c se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby10m}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby10m}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_c}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "d se une",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/{{e2e_lobby10m}}/unirse/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "{{e2e_lobby10m}}",
+                    "unirse",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_d}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _j = pm.response.json();",
+                      "pm.test(\"Tiene código\", function () { pm.expect(/^[0-9A-F]{4}-[0-9A-F]{4}$/.test(_j.codigo_reserva)).to.be.true; });",
+                      "pm.collectionVariables.set('e2e_codigo10m', _j.codigo_reserva);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "El admin hace el check-in",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/partidas/lobbies/check_in/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "partidas",
+                    "lobbies",
+                    "check_in",
+                    ""
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"codigo_reserva\": \"{{e2e_codigo10m}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "La ocupación muestra la reserva cumplida",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/clubes/clubes/{{e2e_club}}/ocupacion/?cancha={{e2e_cancha}}&fecha={{e2e_fecha10m}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "clubes",
+                    "clubes",
+                    "{{e2e_club}}",
+                    "ocupacion",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "cancha",
+                      "value": "{{e2e_cancha}}"
+                    },
+                    {
+                      "key": "fecha",
+                      "value": "{{e2e_fecha10m}}"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tok_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                      "const _fila = pm.response.json().results.find(f => f.id === pm.collectionVariables.get('e2e_turno10m'));",
+                      "pm.test('Aparece el turno', function () { pm.expect(_fila).to.exist; });",
+                      "pm.test(\"Reserva cumplida\", function () { pm.expect(_fila.lobby.reserva === 'CUMPLIDA').to.be.true; });",
+                      "pm.test(\"Turno cumplido\", function () { pm.expect(_fila.estado === 'CUMPLIDO').to.be.true; });",
+                      "pm.test(\"Expone inicio y fin\", function () { pm.expect(!!_fila.inicio && !!_fila.fin).to.be.true; });"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "description": "Flujo autocontenido para correr con newman: `npx newman run InLinePadel.postman_collection.json --folder \"Flujo E2E\"`. Requiere el server levantado y `seed_demo_data` aplicado. Genera sus propios jugadores con un sufijo aleatorio y usa 6 logins (límite: 10 cada 15 minutos por IP)."
     }
   ],
   "variable": [
@@ -2443,19 +4643,19 @@
     },
     {
       "key": "username",
-      "value": "jugador1"
+      "value": "demo@inlinepadel.com"
     },
     {
       "key": "password",
-      "value": "clave12345"
+      "value": "demo1234"
     },
     {
       "key": "admin_username",
-      "value": "adminclub"
+      "value": "admin.norte@inlinepadel.com"
     },
     {
       "key": "admin_password",
-      "value": "clave12345"
+      "value": "clubadmin123"
     },
     {
       "key": "zona_id",
@@ -2508,6 +4708,14 @@
     {
       "key": "refresh",
       "value": ""
+    },
+    {
+      "key": "super_username",
+      "value": "superAdmin@inLinePadel.com"
+    },
+    {
+      "key": "super_password",
+      "value": "admin"
     }
   ],
   "auth": {
