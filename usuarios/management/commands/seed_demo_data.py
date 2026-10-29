@@ -1,13 +1,3 @@
-"""Datos demo para presentar InLine Padel en vivo.
-
-Cada corrida BORRA los datos de la demo (partidas, turnos, contactos, invitaciones,
-notificaciones, y los clubes, zonas y usuarios que no son del seed) y los vuelve a
-crear relativos al momento actual. Así se puede ensayar la presentación varias veces
-y empezar siempre del mismo punto.
-
-Correrlo como mucho 1 hora antes de presentar: la reserva firme y el check-in
-dependen de la hora.
-"""
 from datetime import datetime, time, timedelta
 
 from django.core.cache import cache
@@ -29,23 +19,23 @@ CODIGO_JUGADO = "ACE0-0001"
 
 HORAS_GRILLA = [time(10, 0), time(11, 30), time(16, 30), time(18, 0), time(19, 30), time(21, 0)]
 
-ZONAS = ["Norte", "Sur", "Centro"]
+ZONAS = ["Zarate", "Escobar", "Campana"]
 CLUBES = [
     # (denominación, zona, dirección, admin, canchas [(número, tipo)], precio del turno)
-    ("Club Padel Norte", "Norte", "Av. Santa Fe 2560", "admin.norte@inlinepadel.com",
+    ("Club Padel Norte", "Zarate", "Av. Santa Fe 2560", "admin.norte@inlinepadel.com",
      [(1, Cancha.Tipo.TECHADA), (2, Cancha.Tipo.DESCUBIERTA)], 32000),
-    ("Padel Central", "Centro", "Av. Corrientes 1234", "admin.norte@inlinepadel.com",
+    ("Padel Central", "Campana", "Av. Corrientes 1234", "admin.norte@inlinepadel.com",
      [(1, Cancha.Tipo.TECHADA)], 28000),
-    ("Arena Padel Sur", "Sur", "Av. Rivadavia 8450", "admin.sur@inlinepadel.com",
+    ("Arena Padel Sur", "Escobar", "Av. Rivadavia 8450", "admin.sur@inlinepadel.com",
      [(1, Cancha.Tipo.TECHADA), (2, Cancha.Tipo.DESCUBIERTA)], 30000),
 ]
 JUGADORES = [
     # (username, nombre, apellido, posición, zona)
-    ("demo@inlinepadel.com", "María", "López", Jugador.Posiciones.DRIVE, "Norte"),
-    ("carlos@inlinepadel.com", "Carlos", "Rossi", Jugador.Posiciones.REVES, "Norte"),
-    ("lucia@inlinepadel.com", "Lucía", "Fernández", Jugador.Posiciones.DRIVE, "Sur"),
-    ("nico@inlinepadel.com", "Nicolás", "Molina", Jugador.Posiciones.INDISTINTO, "Centro"),
-    ("sofia@inlinepadel.com", "Sofía", "Duarte", Jugador.Posiciones.REVES, "Sur"),
+    ("demo@inlinepadel.com", "María", "López", Jugador.Posiciones.DRIVE, "Zarate"),
+    ("carlos@inlinepadel.com", "Carlos", "Rossi", Jugador.Posiciones.REVES, "Zarate"),
+    ("lucia@inlinepadel.com", "Lucía", "Fernández", Jugador.Posiciones.DRIVE, "Escobar"),
+    ("nico@inlinepadel.com", "Nicolás", "Molina", Jugador.Posiciones.INDISTINTO, "Campana"),
+    ("sofia@inlinepadel.com", "Sofía", "Duarte", Jugador.Posiciones.REVES, "Escobar"),
 ]
 
 
