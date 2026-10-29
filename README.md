@@ -72,9 +72,14 @@ python manage.py runserver
 `createcachetable` crea la tabla de la caché compartida que usa el throttling
 (límite de intentos de login) cuando hay varios workers.
 
-El comando `seed_demo_data` es idempotente: crea zonas, clubes, canchas,
-turnos, partidas y los usuarios demo para la presentación. El despliegue con
-Docker está en `../InLinePadel-Interfaz/docker-compose.yml`.
+El comando `seed_demo_data` **reinicia** los datos de la demo: borra partidas,
+turnos, contactos, invitaciones y notificaciones (y los clubes, zonas y usuarios
+creados a mano) y vuelve a crear zonas, clubes, canchas, la grilla de turnos de
+mañana y pasado, las partidas de cada escenario y los usuarios demo. Algunas
+partidas dependen de la hora (reserva firme y check-in con el código `CAFE-2026`),
+así que conviene correrlo como mucho una hora antes de presentar. Al terminar
+imprime los escenarios armados. El despliegue con Docker está en
+`../InLinePadel-Interfaz/docker-compose.yml`.
 
 ---
 

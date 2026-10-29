@@ -1,447 +1,226 @@
-from datetime import time, timedelta
+"""Datos demo para presentar InLine Padel en vivo.
 
+Cada corrida BORRA los datos de la demo (partidas, turnos, contactos, invitaciones,
+notificaciones, y los clubes, zonas y usuarios que no son del seed) y los vuelve a
+crear relativos al momento actual. Así se puede ensayar la presentación varias veces
+y empezar siempre del mismo punto.
+
+Correrlo como mucho 1 hora antes de presentar: la reserva firme y el check-in
+dependen de la hora.
+"""
+from datetime import datetime, time, timedelta
+
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
 from clubes.models import Cancha, Club, Turno, Zona
-from config.exceptions import Conflicto, ErrorDominio
 from partidas.models import Inscripcion, Lobby
-from social.models import Contacto, Invitacion, SolicitudAcceso
+from social.models import Contacto, Invitacion, Notificacion, SolicitudAcceso
 from usuarios.models import Jugador, Usuario
 
 PASSWORD_SUPER = "admin"
 PASSWORD_ADMIN = "clubadmin123"
 PASSWORD_JUGADOR = "demo1234"
 
-CODIGO_CHECK_IN = "CHK-DEMO"
-CODIGO_JUGADO = "PLAY-001"
+CODIGO_CHECK_IN = "CAFE-2026"  # hexadecimal: la pantalla de check-in solo acepta 0-9 y A-F
+CODIGO_JUGADO = "ACE0-0001"
 
-HORAS = [time(10, 0), time(11, 30), time(16, 30), time(18, 0), time(19, 30), time(21, 0)]
+HORAS_GRILLA = [time(10, 0), time(11, 30), time(16, 30), time(18, 0), time(19, 30), time(21, 0)]
+
+ZONAS = ["Norte", "Sur", "Centro"]
+CLUBES = [
+    # (denominación, zona, dirección, admin, canchas [(número, tipo)], precio del turno)
+    ("Club Padel Norte", "Norte", "Av. Santa Fe 2560", "admin.norte@inlinepadel.com",
+     [(1, Cancha.Tipo.TECHADA), (2, Cancha.Tipo.DESCUBIERTA)], 32000),
+    ("Padel Central", "Centro", "Av. Corrientes 1234", "admin.norte@inlinepadel.com",
+     [(1, Cancha.Tipo.TECHADA)], 28000),
+    ("Arena Padel Sur", "Sur", "Av. Rivadavia 8450", "admin.sur@inlinepadel.com",
+     [(1, Cancha.Tipo.TECHADA), (2, Cancha.Tipo.DESCUBIERTA)], 30000),
+]
+JUGADORES = [
+    # (username, nombre, apellido, posición, zona)
+    ("demo@inlinepadel.com", "María", "López", Jugador.Posiciones.DRIVE, "Norte"),
+    ("carlos@inlinepadel.com", "Carlos", "Rossi", Jugador.Posiciones.REVES, "Norte"),
+    ("lucia@inlinepadel.com", "Lucía", "Fernández", Jugador.Posiciones.DRIVE, "Sur"),
+    ("nico@inlinepadel.com", "Nicolás", "Molina", Jugador.Posiciones.INDISTINTO, "Centro"),
+    ("sofia@inlinepadel.com", "Sofía", "Duarte", Jugador.Posiciones.REVES, "Sur"),
+]
+
+
+def _redondear(dt, minutos):
+    dt = dt.replace(second=0, microsecond=0)
+    resto = dt.minute % minutos
+    return dt + timedelta(minutes=(minutos - resto) % minutos)
 
 
 class Command(BaseCommand):
-    help = (
-        "Carga datos demo (usuarios, clubes, turnos, partidas y pedidos) "
-        "para la presentación. Es idempotente."
-    )
+    help = "Reinicia los datos demo para presentar en vivo (ver el docstring del módulo)."
 
     @transaction.atomic
     def handle(self, *args, **options):
-        self.stdout.write("Generando datos demo...")
+        self._limpiar()
 
-        self._limpiar_lobbies_vencidos()
+        self._usuario("superAdmin@inLinePadel.com", PASSWORD_SUPER, is_staff=True,
+                      is_superuser=True, first_name="Super", last_name="Admin")
+        admins = {
+            "admin.norte@inlinepadel.com": self._usuario(
+                "admin.norte@inlinepadel.com", PASSWORD_ADMIN, is_staff=True,
+                first_name="Ana", last_name="Norte"),
+            "admin.sur@inlinepadel.com": self._usuario(
+                "admin.sur@inlinepadel.com", PASSWORD_ADMIN, is_staff=True,
+                first_name="Beto", last_name="Sur"),
+        }
+        zonas = {nombre: Zona.objects.get_or_create(nombre=nombre)[0] for nombre in ZONAS}
 
-        superadmin = self._usuario(
-            "superAdmin@inLinePadel.com",
-            PASSWORD_SUPER,
-            is_staff=True,
-            is_superuser=True,
-            first_name="Super",
-            last_name="Admin",
-        )
-        admin_norte = self._usuario(
-            "admin.norte@inlinepadel.com",
-            PASSWORD_ADMIN,
-            is_staff=True,
-            first_name="Ana",
-            last_name="Norte",
-        )
-        admin_sur = self._usuario(
-            "admin.sur@inlinepadel.com",
-            PASSWORD_ADMIN,
-            is_staff=True,
-            first_name="Beto",
-            last_name="Sur",
-        )
-
-        zona_norte = self._zona("Norte")
-        zona_sur = self._zona("Sur")
-        zona_centro = self._zona("Centro")
-
-        club_norte = self._club(
-            zona_norte, "Club Padel Norte", "Av. Santa Fe 2560", admin_norte
-        )
-        club_sur = self._club(
-            zona_sur, "Arena Padel Sur", "Av. Rivadavia 8450", admin_sur
-        )
-        club_centro = self._club(
-            zona_centro, "Padel Central", "Av. Corrientes 1234", admin_norte
-        )
-
-        norte_1 = self._cancha(club_norte, 1, Cancha.Tipo.TECHADA)
-        norte_2 = self._cancha(club_norte, 2, Cancha.Tipo.DESCUBIERTA)
-        sur_1 = self._cancha(club_sur, 1, Cancha.Tipo.TECHADA)
-        sur_2 = self._cancha(club_sur, 2, Cancha.Tipo.DESCUBIERTA)
-        centro_1 = self._cancha(club_centro, 1, Cancha.Tipo.TECHADA)
-
-        jugadores = {}
-        for username, nombre, apellido, posicion, zona in [
-            ("demo@inlinepadel.com", "María", "López", Jugador.Posiciones.DRIVE, zona_norte),
-            ("carlos@inlinepadel.com", "Carlos", "Rossi", Jugador.Posiciones.REVES, zona_norte),
-            ("lucia@inlinepadel.com", "Lucía", "Fernández", Jugador.Posiciones.DRIVE, zona_sur),
-            ("nico@inlinepadel.com", "Nicolás", "Molina", Jugador.Posiciones.INDISTINTO, zona_centro),
-            ("sofia@inlinepadel.com", "Sofía", "Duarte", Jugador.Posiciones.REVES, zona_sur),
-        ]:
-            usuario = self._usuario(
-                username, PASSWORD_JUGADOR, first_name=nombre, last_name=apellido
+        canchas, precios = {}, {}
+        for denominacion, zona, direccion, admin, lista, precio in CLUBES:
+            club, _ = Club.objects.update_or_create(
+                denominacion=denominacion,
+                defaults={"zona": zonas[zona], "direccion": direccion,
+                          "admin": admins[admin], "estado": Club.Estado.ACTIVO},
             )
-            jugadores[username] = self._jugador(usuario, zona, posicion)
+            precios[denominacion] = precio
+            for numero, tipo in lista:
+                canchas[(denominacion, numero)], _ = Cancha.objects.update_or_create(
+                    club=club, numero=numero, defaults={"tipo": tipo, "activa": True})
 
-        maria = jugadores["demo@inlinepadel.com"]
-        carlos = jugadores["carlos@inlinepadel.com"]
-        lucia = jugadores["lucia@inlinepadel.com"]
-        nico = jugadores["nico@inlinepadel.com"]
-        sofia = jugadores["sofia@inlinepadel.com"]
+        # Recién ahora, con los clubes del seed reasignados, se pueden borrar las zonas
+        # y los usuarios creados durante un ensayo.
+        Zona.objects.exclude(nombre__in=ZONAS).delete()
+        propios = ["superAdmin@inLinePadel.com", *admins, *[x[0] for x in JUGADORES]]
+        Usuario.objects.exclude(username__in=propios).delete()
 
-        manana = timezone.localdate() + timedelta(days=1)
+        j = {}
+        for username, nombre, apellido, posicion, zona in JUGADORES:
+            usuario = self._usuario(username, PASSWORD_JUGADOR, first_name=nombre,
+                                    last_name=apellido)
+            j[nombre], _ = Jugador.objects.update_or_create(
+                usuario=usuario, defaults={"posicion": posicion, "zona": zonas[zona]})
+        maria, carlos, lucia, nico, sofia = (j[n] for n in ("María", "Carlos", "Lucía", "Nicolás", "Sofía"))
 
-        for cancha in (norte_1, norte_2, sur_1, sur_2, centro_1):
-            for hora in HORAS:
-                self._turno(cancha, manana, hora, 2000 + hora.hour * 50)
+        # Grilla de mañana y pasado en todas las canchas.
+        hoy = timezone.localdate()
+        for (denominacion, _), cancha in canchas.items():
+            for dias in (1, 2):
+                for hora in HORAS_GRILLA:
+                    self._turno(cancha, hoy + timedelta(days=dias), hora, precios[denominacion])
 
-        for offset in (3, 5):
-            fecha = timezone.localdate() + timedelta(days=offset)
-            for cancha in (norte_1, sur_1, centro_1):
-                for hora in (time(18, 0), time(20, 0)):
-                    self._turno(cancha, fecha, hora, 2300 + hora.hour * 50)
+        manana = hoy + timedelta(days=1)
+        def turno(club, numero, hora):
+            return Turno.objects.get(cancha=canchas[(club, numero)], fecha=manana, hora_inicio=hora)
 
-        turno_a = self._turno(norte_1, manana, time(16, 30), 2200)
-        turno_b = self._turno(norte_2, manana, time(18, 0), 2300)
-        turno_c = self._turno(sur_1, manana, time(19, 30), 2400)
-        turno_d = self._turno(norte_1, manana, time(21, 0), 2500)
+        # Contactos.
+        for a, b in ((maria, carlos), (maria, lucia), (maria, sofia), (carlos, lucia), (lucia, nico)):
+            Contacto.objects.create(jugador=a, contacto=b, estado=Contacto.Estado.ACEPTADO)
+        Contacto.objects.create(jugador=nico, contacto=maria)  # solicitud pendiente para María
 
-        lobby_a = self._lobby(turno_a, maria, [carlos])
-        lobby_b = self._lobby(turno_b, lucia, [nico, sofia])
-        lobby_c = self._lobby(turno_c, carlos, [maria], privacidad=Lobby.Privacidad.PRIVADO)
-        lobby_d = self._lobby(turno_d, nico, [maria, carlos, lucia])
+        # Partidas de mañana.
+        casi_completa = self._lobby(turno("Club Padel Norte", 2, time(21, 0)), carlos, [lucia, nico])
+        de_maria = self._lobby(turno("Padel Central", 1, time(10, 0)), maria, [carlos])
+        privada = self._lobby(turno("Arena Padel Sur", 1, time(19, 30)), lucia, [nico],
+                              Lobby.Privacidad.PRIVADO)
+        Invitacion.objects.create(lobby=privada, emisor=lucia, receptor=maria)
+        completa = self._lobby(turno("Arena Padel Sur", 2, time(18, 0)), nico, [maria, carlos, lucia])
 
-        escenarios = self._escenarios_cierre(club_sur, maria, carlos, lucia, nico, sofia)
+        # Partidas de hoy, relativas a la hora actual.
+        ahora = timezone.localtime()
+        inicio_check = _redondear(ahora + timedelta(minutes=10), 5)
+        check_in = self._lobby(
+            self._turno(canchas[("Club Padel Norte", 1)], inicio_check.date(),
+                        inicio_check.time(), precios["Club Padel Norte"]),
+            sofia, [nico, carlos, lucia])
+        Lobby.objects.filter(pk=check_in.pk).update(codigo_reserva=CODIGO_CHECK_IN)
 
-        lobby_check_in = self._lobby_check_in(sofia, maria, carlos, nico)
-        lobby_jugado = self._lobby_jugado(maria, carlos, lucia, nico)
+        inicio_firme = _redondear(ahora + timedelta(hours=2, minutes=30), 30)
+        firme = self._lobby(
+            self._turno(canchas[("Arena Padel Sur", 1)], inicio_firme.date(),
+                        inicio_firme.time(), precios["Arena Padel Sur"]),
+            lucia, [nico, carlos, maria])
 
-        self._contacto(maria, carlos, Contacto.Estado.ACEPTADO)
-        self._contacto(carlos, lucia, Contacto.Estado.ACEPTADO)
-        self._contacto(sofia, lucia, Contacto.Estado.PENDIENTE)
+        jugado = self._lobby_jugado(canchas[("Club Padel Norte", 2)], hoy - timedelta(days=1),
+                                    [maria, carlos, lucia, nico])
 
-        if (
-            lobby_a is not None
-            and lobby_a.estado == Lobby.Estado.EN_FORMACION
-            and not lobby_a.inscripciones.filter(jugador=sofia).exists()
-            and not Invitacion.objects.filter(
-                lobby=lobby_a, receptor=sofia, estado=Invitacion.Estado.PENDIENTE
-            ).exists()
-        ):
-            Invitacion.objects.create(lobby=lobby_a, emisor=maria, receptor=sofia)
+        # Las notificaciones de armar los datos no aportan a la demo.
+        Notificacion.objects.all().delete()
+        cache.clear()  # reinicia el límite de intentos de login
 
-        if (
-            lobby_c is not None
-            and lobby_c.estado == Lobby.Estado.EN_FORMACION
-            and not lobby_c.inscripciones.filter(jugador=sofia).exists()
-            and not SolicitudAcceso.objects.filter(
-                lobby=lobby_c, jugador=sofia, estado=SolicitudAcceso.Estado.PENDIENTE
-            ).exists()
-        ):
-            SolicitudAcceso.objects.create(lobby=lobby_c, jugador=sofia)
+        self._resumen(casi_completa, de_maria, privada, completa, check_in, firme, jugado)
 
-        self.stdout.write(self.style.SUCCESS("Datos demo listos."))
-        self.stdout.write("")
-        self.stdout.write("Credenciales:")
-        self.stdout.write(f"  Superusuario      superAdmin@inLinePadel.com / {PASSWORD_SUPER}")
-        self.stdout.write(f"  Admin Club Norte  admin.norte@inlinepadel.com / {PASSWORD_ADMIN}")
-        self.stdout.write(f"  Admin Arena Sur   admin.sur@inlinepadel.com / {PASSWORD_ADMIN}")
-        for username in jugadores:
-            self.stdout.write(f"  Jugador           {username} / {PASSWORD_JUGADOR}")
-        self.stdout.write("")
-        self.stdout.write("Códigos para probar:")
-        self.stdout.write(f"  Check-in inmediato  {CODIGO_CHECK_IN} (lobby {lobby_check_in.pk}, Arena Padel Sur)")
-        if lobby_d is not None and lobby_d.codigo_reserva:
-            self.stdout.write(
-                f"  Reserva completa    {lobby_d.codigo_reserva} "
-                f"(lobby {lobby_d.pk}, {lobby_d.turno.fecha:%d/%m} "
-                f"{lobby_d.turno.hora_inicio:%H:%M})"
-            )
-        self.stdout.write(f"  Historial jugado    {CODIGO_JUGADO} (lobby {lobby_jugado.pk})")
-        self.stdout.write("")
-        self._imprimir_escenarios_cierre(lobby_d, escenarios)
-        self.stdout.write("")
-        self.stdout.write(
-            "El check-in con CHK-DEMO funciona ya porque el turno es pasado; "
-            "para repetirlo, volvé a correr este comando."
-        )
-        if superadmin is None:
-            self.stdout.write(self.style.WARNING("No se pudo crear el superusuario."))
+    # ------------------------------------------------------------------ limpieza
+    def _limpiar(self):
+        Notificacion.objects.all().delete()
+        Invitacion.objects.all().delete()
+        SolicitudAcceso.objects.all().delete()
+        Inscripcion.objects.all().delete()
+        Lobby.objects.all().delete()
+        Contacto.objects.all().delete()
+        Turno.objects.all().delete()
+        Cancha.objects.all().delete()
+        Club.objects.exclude(denominacion__in=[c[0] for c in CLUBES]).delete()
 
-    def _escenarios_cierre(self, club, maria, carlos, lucia, nico, sofia):
-        """Partidas relativas a `ahora` para probar el horario de cierre.
-
-        Se borran y se recrean en cada corrida (en canchas dedicadas), porque su
-        horario depende del momento en que se corre el comando.
-        """
-        canchas = [
-            self._cancha(club, 9, Cancha.Tipo.TECHADA),
-            self._cancha(club, 10, Cancha.Tipo.TECHADA),
-        ]
-        Lobby.objects.filter(turno__cancha__in=canchas).delete()
-        Turno.objects.filter(cancha__in=canchas).delete()
-
-        inicio_firme = timezone.localtime() + timedelta(hours=2)
-        inicio_firme = inicio_firme.replace(second=0, microsecond=0)
-        if inicio_firme.minute % 30:
-            inicio_firme += timedelta(minutes=30 - inicio_firme.minute % 30)
-        # El de último momento termina justo cuando empieza el firme: así una misma
-        # persona no tiene superposición horaria entre los dos escenarios.
-        inicio_ultimo = inicio_firme - timedelta(minutes=90)
-
-        turno_firme = self._turno(
-            canchas[0], inicio_firme.date(), inicio_firme.time(), 2400
-        )
-        turno_ultimo = self._turno(
-            canchas[1], inicio_ultimo.date(), inicio_ultimo.time(), 2400
-        )
-
-        firme = self._lobby(turno_firme, lucia, [nico, maria, carlos])
-        ultimo = self._lobby(turno_ultimo, sofia, [])
-
-        self._contacto(maria, sofia, Contacto.Estado.ACEPTADO)
-        cesion = None
-        if firme is not None and firme.estado == Lobby.Estado.COMPLETO:
-            cesion = Invitacion(lobby=firme, emisor=maria, receptor=sofia, reemplaza=maria)
-            cesion.save()
-        return {"firme": firme, "ultimo": ultimo, "cesion": cesion}
-
-    def _imprimir_escenarios_cierre(self, lobby_d, escenarios):
-        self.stdout.write(f"Escenarios del horario de cierre ({Lobby.HORAS_CIERRE} h antes del inicio):")
-        if lobby_d is not None and lobby_d.estado == Lobby.Estado.COMPLETO:
-            cierre = timezone.localtime(lobby_d.cierre)
-            self.stdout.write(
-                f"  Completa, se puede bajar  lobby {lobby_d.pk} (cierre {cierre:%d/%m %H:%M})"
-            )
-        firme, ultimo, cesion = (escenarios[k] for k in ("firme", "ultimo", "cesion"))
-        if firme is not None:
-            inicio = timezone.localtime(firme.turno.inicio)
-            self.stdout.write(
-                f"  Reserva firme             lobby {firme.pk} (empieza {inicio:%d/%m %H:%M}, "
-                f"código {firme.codigo_reserva}): nadie puede bajarse, solo ceder"
-            )
-        if ultimo is not None:
-            inicio = timezone.localtime(ultimo.turno.inicio)
-            self.stdout.write(
-                f"  En formación, último momento  lobby {ultimo.pk} "
-                f"(empieza {inicio:%d/%m %H:%M}): al completarse queda firme"
-            )
-        if cesion is not None:
-            self.stdout.write(
-                f"  Cesión pendiente          invitación {cesion.pk}: María ofrece su lugar "
-                f"en el lobby {cesion.lobby_id} a Sofía (sofia@inlinepadel.com la puede aceptar)"
-            )
-
-    def _limpiar_lobbies_vencidos(self):
-        vencidos = Lobby.objects.filter(
-            estado=Lobby.Estado.EN_FORMACION,
-            turno__inicio__lt=timezone.now(),
-        )
-        cancelados = 0
-        for lobby in vencidos:
-            try:
-                lobby._cancelar(Lobby.CanceladaPor.SISTEMA)
-                cancelados += 1
-            except (ErrorDominio, Conflicto):
-                pass
-        if cancelados:
-            self.stdout.write(
-                f"Se cancelaron {cancelados} partidas vencidas de corridas anteriores."
-            )
-
+    # ------------------------------------------------------------------ helpers
     def _usuario(self, username, password, **extra):
-        usuario, creado = Usuario.objects.get_or_create(
+        usuario, _ = Usuario.objects.update_or_create(
             username=username,
-            defaults={"email": username, **extra},
+            defaults={"email": username, "is_active": True, "is_staff": False,
+                      "is_superuser": False, **extra},
         )
-        campos = []
-        if usuario.email != username:
-            usuario.email = username
-            campos.append("email")
-        for campo, valor in extra.items():
-            if getattr(usuario, campo) != valor:
-                setattr(usuario, campo, valor)
-                campos.append(campo)
-        if creado or not usuario.check_password(password):
-            usuario.set_password(password)
-            campos.append("password")
-        if campos:
-            usuario.save(update_fields=campos)
+        usuario.set_password(password)
+        usuario.save(update_fields=["password"])
         return usuario
 
-    def _zona(self, nombre):
-        zona, _ = Zona.objects.get_or_create(nombre=nombre)
-        return zona
-
-    def _club(self, zona, denominacion, direccion, admin):
-        club, _ = Club.objects.get_or_create(
-            zona=zona,
-            denominacion=denominacion,
-            defaults={"direccion": direccion, "admin": admin, "estado": Club.Estado.ACTIVO},
-        )
-        club.direccion = direccion
-        club.admin = admin
-        club.estado = Club.Estado.ACTIVO
-        club.full_clean()
-        club.save()
-        return club
-
-    def _cancha(self, club, numero, tipo):
-        cancha, _ = Cancha.objects.get_or_create(
-            club=club,
-            numero=numero,
-            defaults={"tipo": tipo, "activa": True},
-        )
-        cancha.tipo = tipo
-        cancha.activa = True
-        cancha.full_clean()
-        cancha.save()
-        return cancha
-
-    def _turno(self, cancha, fecha, hora, precio, estado=Turno.Estado.LIBRE):
-        turno = Turno.objects.filter(
-            cancha=cancha, fecha=fecha, hora_inicio=hora
-        ).first()
-        if turno is None:
-            turno = Turno(
-                cancha=cancha,
-                fecha=fecha,
-                hora_inicio=hora,
-                duracion=90,
-                precio=precio,
-                estado=estado,
-            )
-            turno.save()
+    def _turno(self, cancha, fecha, hora, precio):
+        turno = Turno(cancha=cancha, fecha=fecha, hora_inicio=hora, duracion=90, precio=precio)
+        turno.save()
         return turno
 
-    def _jugador(self, usuario, zona, posicion):
-        jugador, _ = Jugador.objects.get_or_create(
-            usuario=usuario,
-            defaults={"zona": zona, "posicion": posicion},
-        )
-        jugador.zona = zona
-        jugador.posicion = posicion
-        jugador.save(update_fields=["zona", "posicion"])
-        return jugador
-
-    def _lobby(self, turno, capitan, jugadores, privacidad=Lobby.Privacidad.PUBLICO):
-        existente = (
-            Lobby.objects.filter(turno=turno)
-            .exclude(estado=Lobby.Estado.CANCELADO)
-            .first()
-        )
-        if existente is None:
-            try:
-                existente = Lobby.crear(turno, capitan, privacidad=privacidad)
-            except (ErrorDominio, Conflicto) as exc:
-                self.stdout.write(
-                    self.style.WARNING(f"No se pudo crear el lobby de {turno}: {exc}")
-                )
-                return None
-        for jugador in jugadores:
-            if existente.inscripciones.filter(jugador=jugador).exists():
-                continue
-            if existente.estado != Lobby.Estado.EN_FORMACION:
-                break
-            try:
-                existente.inscribir(jugador)
-            except (ErrorDominio, Conflicto) as exc:
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"No se pudo inscribir a {jugador} en el lobby {existente.pk}: {exc}"
-                    )
-                )
-        existente.refresh_from_db(fields=["estado", "codigo_reserva"])
-        return existente
-
-    def _lobby_check_in(self, *jugadores):
-        lobby = Lobby.objects.filter(codigo_reserva=CODIGO_CHECK_IN).first()
-        if lobby is None:
-            turno = self._turno(
-                Cancha.objects.get(club__denominacion="Arena Padel Sur", numero=2),
-                timezone.localdate() - timedelta(days=1),
-                time(22, 30),
-                2400,
-                Turno.Estado.CONFIRMADO,
-            )
-            lobby = self._crear_lobby_pasado(
-                turno,
-                jugadores[0],
-                Lobby.Estado.COMPLETO,
-                CODIGO_CHECK_IN,
-                Lobby.Privacidad.PRIVADO,
-            )
-        else:
-            Lobby.objects.filter(pk=lobby.pk).update(
-                estado=Lobby.Estado.COMPLETO, codigo_reserva=CODIGO_CHECK_IN
-            )
-            Turno.objects.filter(pk=lobby.turno_id).update(estado=Turno.Estado.CONFIRMADO)
-            lobby.inscripciones.all().delete()
-            lobby.refresh_from_db(fields=["estado", "codigo_reserva"])
-        self._inscribir_directo(lobby, list(jugadores))
+    def _lobby(self, turno, capitan, otros, privacidad=Lobby.Privacidad.PUBLICO):
+        lobby = Lobby.crear(turno, capitan, privacidad=privacidad)
+        for jugador in otros:
+            lobby.inscribir(jugador)
+        lobby.refresh_from_db()
         return lobby
 
-    def _lobby_jugado(self, *jugadores):
-        lobby = Lobby.objects.filter(codigo_reserva=CODIGO_JUGADO).first()
-        if lobby is None:
-            turno = self._turno(
-                Cancha.objects.get(club__denominacion="Club Padel Norte", numero=1),
-                timezone.localdate() - timedelta(days=1),
-                time(18, 0),
-                2100,
-                Turno.Estado.CUMPLIDO,
-            )
-            lobby = self._crear_lobby_pasado(
-                turno,
-                jugadores[0],
-                Lobby.Estado.JUGADO,
-                CODIGO_JUGADO,
-                Lobby.Privacidad.PUBLICO,
-            )
-        self._inscribir_directo(lobby, list(jugadores))
-        return lobby
-
-    def _crear_lobby_pasado(self, turno, capitan, estado, codigo, privacidad):
-        lobby = Lobby(
-            turno=turno,
-            capitan=capitan,
-            privacidad=privacidad,
-            estado=estado,
-            plazo_limite=turno.inicio - timedelta(hours=2),
-            fecha_check_in=turno.inicio,
-            codigo_reserva=codigo,
-        )
+    def _lobby_jugado(self, cancha, fecha, jugadores):
+        turno = Turno(cancha=cancha, fecha=fecha, hora_inicio=time(20, 0), duracion=90,
+                      precio=30000, estado=Turno.Estado.CUMPLIDO)
+        turno.save()
+        lobby = Lobby(turno=turno, capitan=jugadores[0], estado=Lobby.Estado.JUGADO,
+                      plazo_limite=turno.inicio - timedelta(hours=3),
+                      fecha_check_in=turno.inicio, codigo_reserva=CODIGO_JUGADO)
         lobby.full_clean()
         lobby.save()
+        for cupo, jugador in enumerate(jugadores, start=1):
+            Inscripcion.objects.create(lobby=lobby, jugador=jugador, numero_cupo=cupo)
         return lobby
 
-    def _inscribir_directo(self, lobby, jugadores):
-        ocupados = set(
-            lobby.inscripciones.values_list("numero_cupo", flat=True)
-        )
-        for jugador in jugadores:
-            if lobby.inscripciones.filter(jugador=jugador).exists():
-                continue
-            libres = [
-                n for n in range(1, Lobby.CANTIDAD_CUPOS + 1) if n not in ocupados
-            ]
-            if not libres:
-                break
-            Inscripcion.objects.create(
-                lobby=lobby, jugador=jugador, numero_cupo=libres[0]
-            )
-            ocupados.add(libres[0])
+    def _resumen(self, casi, de_maria, privada, completa, check_in, firme, jugado):
+        def cuando(l):
+            return f"{timezone.localtime(l.turno.inicio):%d/%m %H:%M}"
 
-    def _contacto(self, jugador, contacto, estado):
-        contacto_obj, creado = Contacto.objects.get_or_create(
-            jugador=jugador, contacto=contacto, defaults={"estado": estado}
-        )
-        if not creado and contacto_obj.estado != estado:
-            contacto_obj.estado = estado
-            contacto_obj.save(update_fields=["estado"])
-        return contacto_obj
+        w = self.stdout.write
+        w(self.style.SUCCESS("Datos demo listos."))
+        w("")
+        w("Usuarios")
+        w(f"  Admin del sistema    superAdmin@inLinePadel.com / {PASSWORD_SUPER}")
+        w(f"  Admin Norte/Central  admin.norte@inlinepadel.com / {PASSWORD_ADMIN}")
+        w(f"  Admin Arena Sur      admin.sur@inlinepadel.com / {PASSWORD_ADMIN}")
+        w(f"  Jugadores            demo@ (María), carlos@, lucia@, nico@, sofia@inlinepadel.com / {PASSWORD_JUGADOR}")
+        w("")
+        w("Partidas")
+        w(f"  {cuando(casi)}  Club Padel Norte c2   3/4 pública (Carlos)    -> Sofía se une y se confirma")
+        w(f"  {cuando(de_maria)}  Padel Central c1      2/4 pública (María)     -> límite de 2 como capitana")
+        w(f"  {cuando(privada)}  Arena Padel Sur c1    2/4 PRIVADA (Lucía)     -> invitación pendiente para María")
+        w(f"  {cuando(completa)}  Arena Padel Sur c2    4/4 (Nico)              -> María se baja; el club cancela")
+        w(f"  {cuando(firme)}  Arena Padel Sur c1    4/4 FIRME (Lucía)       -> María cede el lugar a Sofía")
+        w(f"  {cuando(check_in)}  Club Padel Norte c1   4/4 código {CODIGO_CHECK_IN}   -> check-in de admin.norte")
+        w(f"  {cuando(jugado)}  Club Padel Norte c2   jugada, código {CODIGO_JUGADO} -> historial")
+        w("")
+        w("Contactos: María con Carlos, Lucía y Sofía; Carlos-Lucía; Lucía-Nico. "
+          "Nico le envió una solicitud a María.")
+        w(self.style.WARNING(
+            f"El check-in con {CODIGO_CHECK_IN} sirve hasta las "
+            f"{timezone.localtime(check_in.turno.fin):%H:%M} y la reserva firme hasta las "
+            f"{timezone.localtime(firme.turno.inicio):%H:%M}. Para ensayar de nuevo, volvé a correr el comando."))
